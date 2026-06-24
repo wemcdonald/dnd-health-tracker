@@ -3,6 +3,7 @@ package ddb
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -29,11 +30,33 @@ type Poller struct {
 	// OnStatus reports reachability (true after a good fetch, false on error).
 	OnStatus func(online bool)
 
-	rng *rand.Rand
+	initOnce sync.Once
+	rng      *rand.Rand
+	nudge    chan struct{}
+}
+
+// init lazily creates the nudge channel and RNG. Safe to call from multiple
+// goroutines (Run and Nudge) thanks to sync.Once.
+func (p *Poller) init() {
+	p.initOnce.Do(func() {
+		p.nudge = make(chan struct{}, 1)
+		p.rng = rand.New(rand.NewSource(time.Now().UnixNano()))
+	})
+}
+
+// Nudge requests an immediate fetch (e.g. from the websocket push). It is
+// non-blocking and coalesces: extra nudges while one is pending are dropped.
+func (p *Poller) Nudge() {
+	p.init()
+	select {
+	case p.nudge <- struct{}{}:
+	default:
+	}
 }
 
 // Run polls until ctx is cancelled. It blocks; run it in a goroutine.
 func (p *Poller) Run(ctx context.Context) {
+	p.init()
 	p.applyDefaults()
 
 	var last HP
@@ -66,9 +89,27 @@ func (p *Poller) Run(ctx context.Context) {
 		if time.Now().Before(fastUntil) {
 			interval = p.Fast
 		}
-		if !sleepCtx(ctx, p.jitter(interval)) {
+		if !p.waitNext(ctx, p.jitter(interval)) {
 			return
 		}
+	}
+}
+
+// waitNext blocks until the interval elapses or a nudge arrives, whichever is
+// first. Returns false if ctx is cancelled.
+func (p *Poller) waitNext(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		d = time.Millisecond
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-p.nudge:
+		return true
+	case <-t.C:
+		return true
 	}
 }
 
@@ -84,9 +125,6 @@ func (p *Poller) applyDefaults() {
 	}
 	if p.ErrBackoff <= 0 {
 		p.ErrBackoff = 2 * time.Second
-	}
-	if p.rng == nil {
-		p.rng = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
 }
 

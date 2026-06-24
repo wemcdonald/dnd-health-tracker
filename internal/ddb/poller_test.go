@@ -97,6 +97,38 @@ func TestPollerHandlesErrorsThenRecovers(t *testing.T) {
 	}
 }
 
+func TestPollerNudgeTriggersImmediateFetch(t *testing.T) {
+	var calls int32
+	p := &Poller{
+		Fetcher:     &stubFetcher{fn: func(int) (HP, error) { atomic.AddInt32(&calls, 1); return HP{1, 1, 0}, nil }},
+		CharacterID: "1",
+		Fast:        10 * time.Second, // long, so only a nudge causes a prompt re-fetch
+		Idle:        10 * time.Second,
+		FastWindow:  time.Millisecond,
+		ErrBackoff:  10 * time.Second,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+
+	waitFor(t, func() bool { return atomic.LoadInt32(&calls) >= 1 }, "first fetch")
+	before := atomic.LoadInt32(&calls)
+	p.Nudge()
+	waitFor(t, func() bool { return atomic.LoadInt32(&calls) > before }, "fetch after nudge")
+}
+
+func waitFor(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
 func TestPollerStopsOnContextCancel(t *testing.T) {
 	p := fastPoller(&stubFetcher{fn: func(int) (HP, error) { return HP{1, 1, 0}, nil }})
 	ctx, cancel := context.WithCancel(context.Background())

@@ -36,6 +36,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	secrets, err := config.LoadSecrets(*configDir)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
 
 	strip, err := openStrip(*sim, cfg.Device)
 	if err != nil {
@@ -55,7 +59,7 @@ func main() {
 	case *demo:
 		go demoScript(ctx, engine)
 	case cfg.Device.CharacterID != "":
-		go runPoller(ctx, engine, cfg.Device)
+		go runPoller(ctx, engine, cfg.Device, secrets)
 	default:
 		// No character configured: show the static --hp level after boot.
 		go func() {
@@ -70,10 +74,18 @@ func main() {
 	renderLoop(ctx, strip, engine, cfg.Theme.FPS)
 }
 
-// runPoller fetches HP from D&D Beyond and drives the engine: each change
-// updates health, and reachability updates the connection status.
-func runPoller(ctx context.Context, e *anim.Engine, d config.Device) {
+// runPoller fetches HP from D&D Beyond and drives the engine. If a Cobalt
+// cookie is configured it authenticates (private sheets) and, when a Maps
+// game/user is also configured, subscribes to the websocket to nudge the poller
+// for near-instant updates. Without a cookie it uses the public path.
+func runPoller(ctx context.Context, e *anim.Engine, d config.Device, s config.Secrets) {
 	client := ddb.NewClient()
+	var auth *ddb.CookieAuth
+	if s.CobaltCookie != "" {
+		auth = ddb.NewCookieAuth(s.CobaltCookie)
+		client.SetAuthorizer(auth)
+	}
+
 	p := &ddb.Poller{
 		Fetcher:     client,
 		CharacterID: d.CharacterID,
@@ -89,6 +101,14 @@ func runPoller(ctx context.Context, e *anim.Engine, d config.Device) {
 			}
 		},
 	}
+
+	// Websocket push requires a token (cookie) plus a live Maps game/user.
+	if auth != nil && d.GameID != "" && d.UserID != "" {
+		ws := ddb.NewWSListener(auth, d.GameID, d.UserID)
+		ws.OnNudge = p.Nudge
+		go ws.Run(ctx)
+	}
+
 	p.Run(ctx)
 }
 
