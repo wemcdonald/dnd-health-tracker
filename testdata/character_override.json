@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "message": "",
+  "data": {
+    "baseHitPoints": 38,
+    "bonusHitPoints": 4,
+    "overrideHitPoints": 60,
+    "removedHitPoints": 10,
+    "temporaryHitPoints": 7,
+    "stats": [
+      {"id": 3, "value": 12}
+    ],
+    "classes": [
+      {"level": 5}
+    ],
+    "modifiers": {}
+  }
+}

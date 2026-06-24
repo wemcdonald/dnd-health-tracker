@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/will/dnd-health-tracker/internal/anim"
 	"github.com/will/dnd-health-tracker/internal/config"
+	"github.com/will/dnd-health-tracker/internal/ddb"
 	"github.com/will/dnd-health-tracker/internal/led"
 )
 
@@ -43,27 +45,57 @@ func main() {
 
 	engine := anim.NewEngine(cfg.Theme, strip.Len())
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	go func() { <-stop; cancel() }()
 
-	if *demo {
-		go demoScript(engine)
-	} else {
-		// Static display: show the requested level once the boot sweep finishes.
+	switch {
+	case *demo:
+		go demoScript(ctx, engine)
+	case cfg.Device.CharacterID != "":
+		go runPoller(ctx, engine, cfg.Device)
+	default:
+		// No character configured: show the static --hp level after boot.
 		go func() {
-			time.Sleep(bootSettle())
+			if !sleepCtx(ctx, bootSettle()) {
+				return
+			}
 			engine.SetStatus(anim.StatusOnline)
 			engine.SetHealth(fracHealth(*hp, *temp))
 		}()
 	}
 
-	renderLoop(strip, engine, cfg.Theme.FPS, stop)
+	renderLoop(ctx, strip, engine, cfg.Theme.FPS)
+}
+
+// runPoller fetches HP from D&D Beyond and drives the engine: each change
+// updates health, and reachability updates the connection status.
+func runPoller(ctx context.Context, e *anim.Engine, d config.Device) {
+	client := ddb.NewClient()
+	p := &ddb.Poller{
+		Fetcher:     client,
+		CharacterID: d.CharacterID,
+		Fast:        d.PollFast(),
+		Idle:        d.PollIdle(),
+		OnHP: func(hp ddb.HP) {
+			e.SetStatus(anim.StatusOnline)
+			e.SetHealth(anim.Health{Cur: hp.Current, Max: hp.Max, Temp: hp.Temp})
+		},
+		OnStatus: func(online bool) {
+			if !online {
+				e.SetStatus(anim.StatusOffline)
+			}
+		},
+	}
+	p.Run(ctx)
 }
 
 // renderLoop ticks at fps, advancing the engine by the real elapsed time
-// between frames and pushing each frame to the strip. It returns when stop
-// fires; deferred strip.Close blanks the strip.
-func renderLoop(strip led.Strip, e *anim.Engine, fps int, stop <-chan os.Signal) {
+// between frames and pushing each frame to the strip. It returns when ctx is
+// cancelled; the deferred strip.Close blanks the strip.
+func renderLoop(ctx context.Context, strip led.Strip, e *anim.Engine, fps int) {
 	if fps <= 0 {
 		fps = 60
 	}
@@ -74,7 +106,7 @@ func renderLoop(strip led.Strip, e *anim.Engine, fps int, stop <-chan os.Signal)
 	last := time.Now()
 	for {
 		select {
-		case <-stop:
+		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
 			dt := now.Sub(last)
@@ -89,8 +121,9 @@ func renderLoop(strip led.Strip, e *anim.Engine, fps int, stop <-chan os.Signal)
 }
 
 // demoScript exercises the engine: boot finishes on its own, then we connect,
-// take a couple of hits, heal, and drop to a dangerous low-HP heartbeat.
-func demoScript(e *anim.Engine) {
+// take a couple of hits, heal, and drop to a dangerous low-HP heartbeat. It
+// loops until ctx is cancelled.
+func demoScript(ctx context.Context, e *anim.Engine) {
 	steps := []struct {
 		after  time.Duration
 		status *anim.Status
@@ -106,7 +139,9 @@ func demoScript(e *anim.Engine) {
 	}
 	for {
 		for _, s := range steps {
-			time.Sleep(s.after)
+			if !sleepCtx(ctx, s.after) {
+				return
+			}
 			if s.status != nil {
 				e.SetStatus(*s.status)
 			}
@@ -114,6 +149,18 @@ func demoScript(e *anim.Engine) {
 				e.SetHealth(*s.health)
 			}
 		}
+	}
+}
+
+// sleepCtx sleeps for d or until ctx is cancelled; returns false if cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 

@@ -1,0 +1,36 @@
+{
+  "success": true,
+  "message": "",
+  "data": {
+    "baseHitPoints": 38,
+    "bonusHitPoints": null,
+    "overrideHitPoints": null,
+    "removedHitPoints": 13,
+    "temporaryHitPoints": 0,
+    "stats": [
+      {"id": 1, "value": 16},
+      {"id": 2, "value": 14},
+      {"id": 3, "value": 14},
+      {"id": 4, "value": 10},
+      {"id": 5, "value": 12},
+      {"id": 6, "value": 8}
+    ],
+    "bonusStats": [
+      {"id": 1, "value": null},
+      {"id": 3, "value": null}
+    ],
+    "overrideStats": [
+      {"id": 3, "value": null}
+    ],
+    "classes": [
+      {"level": 5}
+    ],
+    "modifiers": {
+      "race": [
+        {"type": "bonus", "subType": "constitution-score", "value": 2}
+      ],
+      "class": [],
+      "item": []
+    }
+  }
+}
