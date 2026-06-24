@@ -21,17 +21,19 @@ import (
 	"github.com/will/dnd-health-tracker/internal/app"
 	"github.com/will/dnd-health-tracker/internal/config"
 	"github.com/will/dnd-health-tracker/internal/led"
+	"github.com/will/dnd-health-tracker/internal/netcfg"
 	"github.com/will/dnd-health-tracker/internal/web"
 )
 
 func main() {
 	var (
-		configDir = flag.String("config-dir", "/etc/healthbar", "directory with device.toml, theme.toml, wifi.toml, secrets.toml")
-		sim       = flag.Bool("sim", true, "render to the terminal simulator instead of hardware")
-		demo      = flag.Bool("demo", false, "script a boot/damage/heal sequence (no networking)")
-		webAddr   = flag.String("web-addr", ":8080", "address for the config web UI (empty to disable)")
-		hp        = flag.Float64("hp", 1.0, "static HP fraction when no character is configured")
-		temp      = flag.Float64("temp", 0.0, "temporary-HP fraction for the static display")
+		configDir  = flag.String("config-dir", "/etc/healthbar", "directory with device.toml, theme.toml, wifi.toml, secrets.toml")
+		sim        = flag.Bool("sim", true, "render to the terminal simulator instead of hardware")
+		demo       = flag.Bool("demo", false, "script a boot/damage/heal sequence (no networking)")
+		webAddr    = flag.String("web-addr", ":8080", "address for the config web UI (empty to disable)")
+		manageWiFi = flag.Bool("manage-wifi", false, "manage WiFi via NetworkManager + captive-portal fallback (Pi only)")
+		hp         = flag.Float64("hp", 1.0, "static HP fraction when no character is configured")
+		temp       = flag.Float64("temp", 0.0, "temporary-HP fraction for the static display")
 	)
 	flag.Parse()
 
@@ -66,6 +68,9 @@ func main() {
 		go demoScript(ctx, engine)
 	} else {
 		application := app.New(*configDir, engine, cfg, secrets, wifi)
+		if *manageWiFi {
+			startWiFi(ctx, application, wifi)
+		}
 		application.Start(ctx)
 		if cfg.Device.CharacterID == "" {
 			go staticHP(ctx, engine, *hp, *temp)
@@ -76,6 +81,18 @@ func main() {
 	}
 
 	renderLoop(ctx, strip, engine, cfg.Theme.FPS)
+}
+
+// startWiFi syncs known networks into NetworkManager, installs the sync hook so
+// web edits re-sync, and starts the captive-portal connectivity watcher.
+func startWiFi(ctx context.Context, application *app.App, wifi config.WiFi) {
+	mgr := netcfg.NewManager()
+	application.SetWiFiSync(func(w config.WiFi) error { return mgr.Sync(ctx, w) })
+	if err := mgr.Sync(ctx, wifi); err != nil {
+		log.Printf("wifi sync: %v", err)
+	}
+	watcher := &netcfg.Watcher{Mgr: mgr, Log: log.Printf}
+	go watcher.Run(ctx)
 }
 
 // serveWeb runs the config UI until ctx is cancelled.

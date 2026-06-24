@@ -46,7 +46,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/wifi/remove", s.handleWiFiRemove)
 	mux.HandleFunc("/credentials", s.handleCredentials)
 	mux.HandleFunc("/api/capture", s.handleCapture)
+
+	// Captive-portal probes used by phones/laptops to detect a portal. Bouncing
+	// them to "/" pops the setup page open when the AP fallback is active.
+	for _, p := range []string{
+		"/generate_204", "/gen_204", "/ncsi.txt", "/connecttest.txt",
+		"/hotspot-detect.html", "/library/test/success.html", "/redirect",
+	} {
+		mux.HandleFunc(p, s.handlePortal)
+	}
 	return mux
+}
+
+func (s *Server) handlePortal(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
