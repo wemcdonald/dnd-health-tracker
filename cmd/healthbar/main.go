@@ -1,34 +1,37 @@
 // Command healthbar drives the D&D Beyond LED health bar.
 //
-// Phase 1/2 wiring: load config, open the LED strip (terminal simulator by
-// default), and run the animation engine in a render loop. With --demo it
-// scripts a boot→connecting→online sequence plus damage/heal events so the
-// simulator output is visible without any D&D Beyond connection. Later phases
-// feed the engine from the DDB poller/websocket and add the web UI.
+// It loads configuration, opens the LED strip (terminal simulator by default),
+// runs the animation engine in a render loop, supervises the D&D Beyond
+// poller/websocket via the app package, and serves the no-auth web config UI.
+// With --demo it scripts a boot/hit/heal sequence and skips networking so the
+// simulator output is visible with no configuration.
 package main
 
 import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/will/dnd-health-tracker/internal/anim"
+	"github.com/will/dnd-health-tracker/internal/app"
 	"github.com/will/dnd-health-tracker/internal/config"
-	"github.com/will/dnd-health-tracker/internal/ddb"
 	"github.com/will/dnd-health-tracker/internal/led"
+	"github.com/will/dnd-health-tracker/internal/web"
 )
 
 func main() {
 	var (
-		configDir = flag.String("config-dir", "/etc/healthbar", "directory containing device.toml and theme.toml")
+		configDir = flag.String("config-dir", "/etc/healthbar", "directory with device.toml, theme.toml, wifi.toml, secrets.toml")
 		sim       = flag.Bool("sim", true, "render to the terminal simulator instead of hardware")
-		demo      = flag.Bool("demo", false, "script a boot/damage/heal sequence (no D&D Beyond connection)")
-		hp        = flag.Float64("hp", 1.0, "static HP fraction to display when not in --demo mode")
-		temp      = flag.Float64("temp", 0.0, "temporary-HP fraction to display")
+		demo      = flag.Bool("demo", false, "script a boot/damage/heal sequence (no networking)")
+		webAddr   = flag.String("web-addr", ":8080", "address for the config web UI (empty to disable)")
+		hp        = flag.Float64("hp", 1.0, "static HP fraction when no character is configured")
+		temp      = flag.Float64("temp", 0.0, "temporary-HP fraction for the static display")
 	)
 	flag.Parse()
 
@@ -37,6 +40,10 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 	secrets, err := config.LoadSecrets(*configDir)
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	wifi, err := config.LoadWiFi(*configDir)
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -55,61 +62,35 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() { <-stop; cancel() }()
 
-	switch {
-	case *demo:
+	if *demo {
 		go demoScript(ctx, engine)
-	case cfg.Device.CharacterID != "":
-		go runPoller(ctx, engine, cfg.Device, secrets)
-	default:
-		// No character configured: show the static --hp level after boot.
-		go func() {
-			if !sleepCtx(ctx, bootSettle()) {
-				return
-			}
-			engine.SetStatus(anim.StatusOnline)
-			engine.SetHealth(fracHealth(*hp, *temp))
-		}()
+	} else {
+		application := app.New(*configDir, engine, cfg, secrets, wifi)
+		application.Start(ctx)
+		if cfg.Device.CharacterID == "" {
+			go staticHP(ctx, engine, *hp, *temp)
+		}
+		if *webAddr != "" {
+			go serveWeb(ctx, application, *webAddr)
+		}
 	}
 
 	renderLoop(ctx, strip, engine, cfg.Theme.FPS)
 }
 
-// runPoller fetches HP from D&D Beyond and drives the engine. If a Cobalt
-// cookie is configured it authenticates (private sheets) and, when a Maps
-// game/user is also configured, subscribes to the websocket to nudge the poller
-// for near-instant updates. Without a cookie it uses the public path.
-func runPoller(ctx context.Context, e *anim.Engine, d config.Device, s config.Secrets) {
-	client := ddb.NewClient()
-	var auth *ddb.CookieAuth
-	if s.CobaltCookie != "" {
-		auth = ddb.NewCookieAuth(s.CobaltCookie)
-		client.SetAuthorizer(auth)
+// serveWeb runs the config UI until ctx is cancelled.
+func serveWeb(ctx context.Context, backend web.Backend, addr string) {
+	srv := &http.Server{Addr: addr, Handler: web.NewServer(backend).Handler()}
+	go func() {
+		<-ctx.Done()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
+	}()
+	log.Printf("web config UI on %s", addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("web server: %v", err)
 	}
-
-	p := &ddb.Poller{
-		Fetcher:     client,
-		CharacterID: d.CharacterID,
-		Fast:        d.PollFast(),
-		Idle:        d.PollIdle(),
-		OnHP: func(hp ddb.HP) {
-			e.SetStatus(anim.StatusOnline)
-			e.SetHealth(anim.Health{Cur: hp.Current, Max: hp.Max, Temp: hp.Temp})
-		},
-		OnStatus: func(online bool) {
-			if !online {
-				e.SetStatus(anim.StatusOffline)
-			}
-		},
-	}
-
-	// Websocket push requires a token (cookie) plus a live Maps game/user.
-	if auth != nil && d.GameID != "" && d.UserID != "" {
-		ws := ddb.NewWSListener(auth, d.GameID, d.UserID)
-		ws.OnNudge = p.Nudge
-		go ws.Run(ctx)
-	}
-
-	p.Run(ctx)
 }
 
 // renderLoop ticks at fps, advancing the engine by the real elapsed time
@@ -138,6 +119,16 @@ func renderLoop(ctx context.Context, strip led.Strip, e *anim.Engine, fps int) {
 			}
 		}
 	}
+}
+
+// staticHP shows a fixed HP level (from --hp/--temp) once boot finishes, for
+// development when no character is configured.
+func staticHP(ctx context.Context, e *anim.Engine, hp, temp float64) {
+	if !sleepCtx(ctx, bootSettle()) {
+		return
+	}
+	e.SetStatus(anim.StatusOnline)
+	e.SetHealth(fracHealth(hp, temp))
 }
 
 // demoScript exercises the engine: boot finishes on its own, then we connect,
@@ -172,6 +163,8 @@ func demoScript(ctx context.Context, e *anim.Engine) {
 	}
 }
 
+func statusPtr(s anim.Status) *anim.Status { return &s }
+
 // sleepCtx sleeps for d or until ctx is cancelled; returns false if cancelled.
 func sleepCtx(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
@@ -183,8 +176,6 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 		return true
 	}
 }
-
-func statusPtr(s anim.Status) *anim.Status { return &s }
 
 // bootSettle is how long to wait for the boot sweep to finish before showing
 // real data.

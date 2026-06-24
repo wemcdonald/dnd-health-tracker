@@ -1,0 +1,22 @@
+{{define "content"}}
+<p class="muted">The bar joins the highest-priority known network in range automatically.</p>
+{{if .Networks}}
+{{range .Networks}}
+<div class="card" style="display:flex;align-items:center;justify-content:space-between">
+  <div><strong>{{.SSID}}</strong> <span class="muted">· priority {{.Priority}}</span></div>
+  <form method="post" action="/wifi/remove" style="margin:0">
+    <input type="hidden" name="ssid" value="{{.SSID}}">
+    <button class="secondary" style="margin:0" type="submit">Remove</button>
+  </form>
+</div>
+{{end}}
+{{else}}<p class="muted">No known networks yet.</p>{{end}}
+
+<h2>Add / update a network</h2>
+<form method="post" action="/wifi">
+  <label>Network name (SSID)</label><input name="ssid" required>
+  <label>Password</label><input name="psk" type="password" placeholder="leave blank for open networks">
+  <label>Priority (higher wins)</label><input name="priority" type="number" value="0">
+  <button type="submit">Save network</button>
+</form>
+{{end}}

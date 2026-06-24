@@ -1,0 +1,37 @@
+{{define "content"}}
+{{with .Theme}}
+<form method="post" action="/theme">
+  <h2>Colors</h2>
+  <div class="row">
+    <div><label>Full HP</label><input name="hp_high" type="color" value="{{hex .HPHigh}}"></div>
+    <div><label>Mid HP</label><input name="hp_mid" type="color" value="{{hex .HPMid}}"></div>
+    <div><label>Low HP</label><input name="hp_low" type="color" value="{{hex .HPLow}}"></div>
+  </div>
+  <div class="row">
+    <div><label>Temp HP</label><input name="temp_hp" type="color" value="{{hex .Temp}}"></div>
+    <div><label>Status</label><input name="status" type="color" value="{{hex .Status}}"></div>
+  </div>
+  <h2>Thresholds &amp; render</h2>
+  <div class="row">
+    <div><label>Mid fraction</label><input name="mid_fraction" type="number" step="0.05" min="0" max="1" value="{{.MidFraction}}"></div>
+    <div><label>Low fraction</label><input name="low_fraction" type="number" step="0.05" min="0" max="1" value="{{.LowFraction}}"></div>
+  </div>
+  <div class="row">
+    <div><label>Brightness</label><input name="brightness" type="number" step="0.05" min="0" max="1" value="{{.Brightness}}"></div>
+    <div><label>FPS</label><input name="fps" type="number" value="{{.FPS}}"></div>
+  </div>
+  <h2>Animation timing</h2>
+  <div class="row">
+    <div><label>Flash (ms)</label><input name="flash_millis" type="number" value="{{.FlashMillis}}"></div>
+    <div><label>Adjust (ms)</label><input name="adjust_millis" type="number" value="{{.AdjustMillis}}"></div>
+  </div>
+  <div class="row">
+    <div><label>Idle shimmer</label><input name="idle_shimmer" type="number" step="0.01" min="0" max="1" value="{{.IdleShimmer}}"></div>
+    <div><label>Shimmer Hz</label><input name="idle_shimmer_hz" type="number" step="0.05" value="{{.IdleShimmerHz}}"></div>
+    <div><label>Low pulse Hz</label><input name="low_pulse_hz" type="number" step="0.05" value="{{.LowPulseHz}}"></div>
+  </div>
+  <p class="muted">Theme changes apply live, no restart needed.</p>
+  <button type="submit">Save theme</button>
+</form>
+{{end}}
+{{end}}

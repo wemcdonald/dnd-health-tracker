@@ -1,0 +1,39 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Health Bar</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 1rem;
+         background:#15151c; color:#e6e6ee; line-height:1.5; }
+  h1 { font-size:1.3rem; } h2 { font-size:1.05rem; margin-top:1.5rem; }
+  nav a { margin-right:.8rem; color:#8ab4ff; text-decoration:none; }
+  nav { border-bottom:1px solid #333; padding-bottom:.6rem; margin-bottom:1rem; }
+  label { display:block; margin:.6rem 0 .15rem; font-size:.9rem; color:#b8b8c8; }
+  input, select { width:100%; box-sizing:border-box; padding:.45rem; background:#22222c;
+                  color:#e6e6ee; border:1px solid #3a3a48; border-radius:6px; }
+  input[type=color]{ height:2.4rem; padding:.2rem; }
+  button { margin-top:1rem; padding:.55rem 1rem; background:#3358d4; color:#fff; border:0;
+           border-radius:6px; cursor:pointer; font-size:1rem; }
+  button.secondary { background:#444; }
+  .row { display:flex; gap:.8rem; } .row > div { flex:1; }
+  .card { background:#1d1d26; border:1px solid #2c2c38; border-radius:8px; padding:1rem; margin:.6rem 0; }
+  .pill { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:.8rem; }
+  .online{background:#16502a;color:#7ee2a0} .offline{background:#5a1f1f;color:#ff9b9b}
+  .connecting{background:#4a3f15;color:#f0d77a}
+  .muted{color:#8a8a98; font-size:.85rem} code{background:#000;padding:.1rem .3rem;border-radius:4px}
+  .flash{background:#16502a;color:#cffcdc;padding:.5rem .8rem;border-radius:6px;margin-bottom:1rem}
+</style>
+</head>
+<body>
+<nav>
+  <a href="/">Status</a><a href="/device">Player</a><a href="/theme">Theme</a>
+  <a href="/wifi">WiFi</a><a href="/credentials">D&amp;D Beyond</a>
+</nav>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+<h1>{{.Title}}</h1>
+{{template "content" .}}
+</body>
+</html>{{end}}

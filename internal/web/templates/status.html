@@ -1,0 +1,24 @@
+{{define "content"}}
+{{with .Status}}
+<div class="card">
+  <h2 style="margin-top:0">{{if .Player}}{{.Player}}{{else}}(unnamed player){{end}}
+    <span class="pill {{.Connection}}">{{.Connection}}</span></h2>
+  {{if .CharacterID}}
+    <p style="font-size:1.6rem;margin:.3rem 0">
+      ❤️ {{.HP}} / {{.MaxHP}}{{if .TempHP}} <span style="color:#3c8cff">(+{{.TempHP}} temp)</span>{{end}}
+    </p>
+    <p class="muted">Character <code>{{.CharacterID}}</code>
+      {{if .PublicMode}}· public mode (no cookie){{else}}· authenticated{{end}}
+      {{if .GameLinked}}· websocket linked{{end}}</p>
+  {{else}}
+    <p class="muted">No character configured yet. Set one under
+      <a href="/credentials">D&amp;D Beyond</a> or <a href="/device">Player</a>.</p>
+  {{end}}
+</div>
+<h2>Reach this page</h2>
+<div class="card">
+  {{if .IPs}}<p>{{range .IPs}}<code>http://{{.}}/</code><br>{{end}}</p>
+  {{else}}<p class="muted">No network addresses detected.</p>{{end}}
+</div>
+{{end}}
+{{end}}

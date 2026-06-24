@@ -1,0 +1,26 @@
+{{define "content"}}
+{{with .Device}}
+<form method="post" action="/device">
+  <label>Player name</label>
+  <input name="player_name" value="{{.PlayerName}}" placeholder="Aldric the Bold">
+  <label>D&amp;D Beyond character id</label>
+  <input name="character_id" value="{{.CharacterID}}" placeholder="number at the end of the character URL">
+  <div class="row">
+    <div><label>User id (optional)</label><input name="user_id" value="{{.UserID}}"></div>
+    <div><label>Game id (optional)</label><input name="game_id" value="{{.GameID}}"></div>
+  </div>
+  <p class="muted">User/Game ids enable the websocket push from a live D&amp;D Beyond Maps session.</p>
+  <div class="row">
+    <div><label>LED count</label><input name="num_leds" type="number" min="1" value="{{.NumLEDs}}"></div>
+    <div><label>GPIO pin</label><input name="gpio_pin" type="number" value="{{.GPIOPin}}"></div>
+  </div>
+  <div class="row">
+    <div><label>Brightness (0–1)</label><input name="brightness" type="number" step="0.05" min="0" max="1" value="{{.Brightness}}"></div>
+    <div><label>Fast poll (s)</label><input name="poll_fast_seconds" type="number" step="1" value="{{.PollFastSeconds}}"></div>
+    <div><label>Idle poll (s)</label><input name="poll_idle_seconds" type="number" step="1" value="{{.PollIdleSeconds}}"></div>
+  </div>
+  <p class="muted">LED count and GPIO pin take effect after a restart.</p>
+  <button type="submit">Save player</button>
+</form>
+{{end}}
+{{end}}
