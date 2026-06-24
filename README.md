@@ -4,16 +4,37 @@ A glowing WS2812B LED health bar that mirrors a D&D Beyond character's current
 HP in near-real-time. Runs on a Raspberry Pi Zero 2 W; one unit per party
 member. Written in Go.
 
-See the full design in `docs/plans/` (or the approved plan) for architecture,
-D&D Beyond integration, WiFi/captive-portal, and provisioning details.
+See the full design in `docs/plans/` for architecture rationale, and
+[`deploy/README.md`](deploy/README.md) for the hardware build + provisioning
+guide.
 
-## Status
+## What it does
 
-Built in phases. **Phase 1 (skeleton + simulator)** is complete: config
-loading, the LED strip abstraction, a terminal simulator backend, and the
-HP→bar mapping. Remaining phases add animations + state machine, the D&D Beyond
-client (poll + websocket), the no-auth web config UI, multi-network WiFi with a
-captive-portal fallback, and on-Pi hardware/provisioning.
+- **Live HP** from D&D Beyond: public-first fetch (no login needed if the sheet
+  is Public), or authenticated via a pasted Cobalt cookie for private sheets.
+- **Responsive without hammering**: an adaptive poller (fast right after a
+  change, slow when idle, jittered) plus an optional Maps-session **websocket**
+  that pushes "fetch now" nudges for near-instant updates.
+- **Animations**: red/green flash on damage/heal, an eased bar adjust, an
+  ambient idle shimmer, a low-HP heartbeat, and distinct boot/connecting/offline
+  status patterns — each a discrete, unit-tested function; all colors/timing are
+  hot-reloadable constants in `theme.toml`.
+- **No-auth web UI**: status + editors for player, theme (live), and WiFi, plus
+  a credential-capture flow (a bookmarklet grabs the character id; guided paste
+  for the cookie).
+- **Bulletproof WiFi**: multiple known networks synced into NetworkManager with
+  priority, and a captive-portal access-point fallback (`healthbar-setup`) when
+  no known network is in range.
+- **Runs headless** on the Pi via systemd; SSH-over-USB-C for maintenance.
+
+## Architecture
+
+A single Go binary. Goroutines share a mutex-guarded animation `Engine`:
+the **poller**/**websocket** (`internal/ddb`) push HP + status into it, a
+fixed-FPS **render loop** reads it and drives the **LED strip** (`internal/led`,
+hardware or terminal simulator), the **web UI** (`internal/web`) edits config
+through the **app supervisor** (`internal/app`), and `internal/netcfg` manages
+WiFi. The whole thing runs on a laptop with the simulator — no hardware needed.
 
 ## Develop without hardware
 
