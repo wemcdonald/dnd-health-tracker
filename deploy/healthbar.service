@@ -1,0 +1,23 @@
+[Unit]
+Description=D&D Beyond LED Health Bar
+Documentation=https://github.com/will/dnd-health-tracker
+After=network.target NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+# Root is required for WS2812B DMA/PWM (GPIO) and for binding port 80.
+User=root
+ExecStart=/usr/local/bin/healthbar \
+  --sim=false \
+  --manage-wifi \
+  --config-dir /etc/healthbar \
+  --web-addr :80
+Restart=always
+RestartSec=3
+# Blank the strip cleanly on stop (binary handles SIGTERM).
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target
