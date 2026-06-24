@@ -1,0 +1,20 @@
+# Per-unit device configuration. Copy to /etc/healthbar/device.toml on each Pi
+# and change at least player_name + character_id. Everything else has a default.
+
+player_name  = "Aldric the Bold"
+character_id = "123456789"   # the number at the end of your D&D Beyond character URL
+
+# Optional. Only needed for the websocket push path (a live D&D Beyond Maps game).
+# Leave blank to use polling only. If your sheet is set to "Public" you need
+# neither these nor a cookie.
+user_id = ""
+game_id = ""
+
+# Hardware
+num_leds   = 16     # 16 or 17
+gpio_pin   = 18     # BCM pin the strip data line is wired to (GPIO18 = PWM)
+brightness = 0.5    # hardware brightness, 0.0 - 1.0
+
+# Polling cadence (seconds). Fast right after a change is seen, idle otherwise.
+poll_fast_seconds = 3
+poll_idle_seconds = 25

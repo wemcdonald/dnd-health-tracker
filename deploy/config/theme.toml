@@ -1,0 +1,26 @@
+# Look-and-feel constants. Copy to /etc/healthbar/theme.toml. Re-read on save,
+# so you can tweak colors/timing and see the result without rebuilding.
+# Colors are #RRGGBB. Any field you omit keeps its built-in default.
+
+# --- Colors ---
+hp_high = "#00dc3c"   # full health
+hp_mid  = "#e6b400"   # mid health
+hp_low  = "#dc1414"   # near death
+temp_hp = "#3c8cff"   # temporary-HP overshield
+flash   = "#ffffff"   # flash overlay base
+status  = "#5050a0"   # connecting / status patterns
+
+# --- Thresholds (fraction of max HP) ---
+mid_fraction = 0.5    # at/above this, bar trends toward hp_high
+low_fraction = 0.25   # at/below this, bar is hp_low and low-HP pulse kicks in
+
+# --- Render ---
+brightness = 1.0      # render-time multiplier on top of hardware brightness
+fps        = 60
+
+# --- Animation tuning ---
+flash_millis    = 220   # damage/heal flash length
+adjust_millis   = 600   # how long the bar takes to grow/shrink to a new level
+idle_shimmer    = 0.08  # ambient breathing amplitude (0 = off)
+idle_shimmer_hz = 0.25  # ambient breathing speed
+low_pulse_hz    = 1.4   # low-HP heartbeat speed

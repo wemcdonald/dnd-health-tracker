@@ -1,0 +1,9 @@
+# Built binaries
+/healthbar
+/healthbar-*
+*.armv7
+*.arm64
+
+# Local secrets (never commit cookies/tokens)
+secrets.toml
+/etc/healthbar/
