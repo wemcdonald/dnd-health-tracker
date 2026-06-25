@@ -1,5 +1,11 @@
 # D&D Beyond LED Health Bar — Software Plan
 
+> **⚠️ SUPERSEDED (2026-06-24).** This plan targets the Raspberry Pi Zero 2 W
+> (full Linux, Go). The project moved to the **Raspberry Pi Pico 2 W**
+> (RP2350 microcontroller, MicroPython). See
+> [`2026-06-24-pico2w-healthbar-design.md`](2026-06-24-pico2w-healthbar-design.md).
+> The Go implementation is archived in `legacy-go/`. Kept here for history.
+
 ## Context
 
 Building the software for a physical, glowing LED health bar: a WS2812B strip (16–17 LEDs)

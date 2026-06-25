@@ -1,0 +1,9 @@
+player_name = "Shen Agan"
+character_id = "145533848"
+user_id = ""
+game_id = ""
+num_leds = 16
+gpio_pin = 18
+brightness = 0.5
+poll_fast_seconds = 3.0
+poll_idle_seconds = 25.0

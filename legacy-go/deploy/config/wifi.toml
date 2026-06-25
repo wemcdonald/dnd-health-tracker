@@ -1,0 +1,4 @@
+[[networks]]
+  ssid = "AmalfiCoast"
+  psk = "willandrobin"
+  priority = 0

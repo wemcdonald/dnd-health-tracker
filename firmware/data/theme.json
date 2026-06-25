@@ -1,0 +1,16 @@
+{
+  "hp_high": "#00dc3c",
+  "hp_mid": "#e6b400",
+  "hp_low": "#dc1414",
+  "temp_hp": "#3c8cff",
+  "status": "#5050a0",
+  "mid_fraction": 0.5,
+  "low_fraction": 0.25,
+  "brightness": 1.0,
+  "fps": 30,
+  "flash_millis": 220,
+  "adjust_millis": 600,
+  "idle_shimmer": 0.08,
+  "idle_shimmer_hz": 0.25,
+  "low_pulse_hz": 1.4
+}

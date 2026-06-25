@@ -1,0 +1,53 @@
+{
+  "success": true,
+  "message": "",
+  "baseHitPoints": 999,
+  "data": {
+    "id": 12345678,
+    "name": "Tordek \"Ironbeard\" Stoutaxe, the \\ Brave",
+    "baseHitPoints": 40,
+    "bonusHitPoints": 8,
+    "overrideHitPoints": null,
+    "removedHitPoints": 13,
+    "temporaryHitPoints": 9,
+    "decoy": { "baseHitPoints": 777, "removedHitPoints": 777 },
+    "notes": {
+      "personalPossessions": "A long rambling note with {braces}, \"quotes\", commas, and the words baseHitPoints and value: 123 to try to confuse the scanner. Unicode: ☃ snowman.",
+      "otherNotes": null
+    },
+    "stats": [
+      { "id": 1, "value": 16 },
+      { "id": 2, "value": 12 },
+      { "id": 3, "value": 14 },
+      { "id": 4, "value": 10 },
+      { "id": 5, "value": 13 },
+      { "id": 6, "value": 8 }
+    ],
+    "bonusStats": [
+      { "id": 1, "value": null },
+      { "id": 3, "value": 2 }
+    ],
+    "overrideStats": [
+      { "id": 1, "value": null },
+      { "id": 3, "value": null }
+    ],
+    "classes": [
+      { "level": 3, "definition": { "name": "Fighter", "hitDice": 10 } },
+      { "level": 2, "definition": { "name": "Rogue", "hitDice": 8 } }
+    ],
+    "modifiers": {
+      "race": [
+        { "type": "bonus", "subType": "constitution-score", "value": 1, "friendlyTypeName": "Bonus" },
+        { "type": "bonus", "subType": "dexterity-score", "value": 2 }
+      ],
+      "class": [
+        { "type": "set", "subType": "constitution-score", "value": 99 },
+        { "type": "proficiency", "subType": "athletics", "value": null }
+      ],
+      "feat": [
+        { "type": "bonus", "subType": "hit-points-per-level", "value": 1 }
+      ]
+    },
+    "spells": [ [ { "id": 1 } ], [ { "id": 2 } ] ]
+  }
+}
