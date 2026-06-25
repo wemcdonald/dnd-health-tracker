@@ -72,6 +72,24 @@ def test_render_page():
     assert "character_id" in html and "name=psk" in html
     assert "Cafe" in html and "Saved." in html
     assert "<option value=\"Home\">" in html
+    assert "game_id" in html and "cobalt_cookie" in html
+
+
+def test_websocket_fields_save():
+    d = tempfile.mkdtemp()
+    # game/user/cookie are optional websocket settings
+    act = portal.apply_save(
+        {"game_id": "111", "user_id": "222", "cobalt_cookie": "CobaltSession=abc"}, d)
+    assert act == "device"
+    dev = config.load_device(d)
+    assert dev.game_id == "111" and dev.user_id == "222"
+    assert config.cobalt_cookie(d) == "CobaltSession=abc"
+    # the cookie value is never rendered back into the page (only a "saved" note)
+    html = portal.render_page(d)
+    assert "CobaltSession=abc" not in html and "saved" in html
+    # a blank cookie on a later save leaves the stored one untouched
+    portal.apply_save({"character_id": "9"}, d)
+    assert config.cobalt_cookie(d) == "CobaltSession=abc"
 
 
 def main():
@@ -79,6 +97,7 @@ def main():
     test_parse_form()
     test_apply_save_roundtrip()
     test_render_page()
+    test_websocket_fields_save()
     print("test_portal: OK")
 
 

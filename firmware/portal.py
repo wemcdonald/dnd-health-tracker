@@ -135,8 +135,21 @@ def apply_save(form, data_dir="data"):
     if form.get("player_name", "").strip():
         dev.player_name = form["player_name"].strip()
         changed = True
+    # Optional websocket fields.
+    for field in ("user_id", "game_id"):
+        v = form.get(field, "").strip()
+        if v != getattr(dev, field):
+            setattr(dev, field, v)
+            changed = True
     if changed:
         config.save_device(dev, data_dir)
+        if action == "":
+            action = "device"
+
+    # Cobalt cookie -> secrets (only when provided; empty leaves it untouched).
+    cookie = form.get("cobalt_cookie", "").strip()
+    if cookie:
+        config.save_secrets({"cobalt_cookie": cookie}, data_dir)
         if action == "":
             action = "device"
     return action
@@ -144,50 +157,64 @@ def apply_save(form, data_dir="data"):
 
 # ----- HTML ---------------------------------------------------------------
 
+def _esc(v):
+    return str(v).replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
+
+
 def render_page(data_dir="data", ssids=None, message=""):
     dev = config.load_device(data_dir)
     nets = config.load_wifi(data_dir)
+    has_cookie = bool(config.cobalt_cookie(data_dir))
     ssids = ssids or []
 
-    opts = "".join('<option value="%s">%s</option>' % (s, s) for s in ssids)
+    scan = ""
+    if ssids:
+        opts = "".join('<option value="%s">%s</option>' % (_esc(s), _esc(s)) for s in ssids)
+        scan = ("<select name=ssid_pick onchange=\"document.getElementById('ssid')"
+                ".value=this.value\"><option value=''>-- pick from scan --</option>"
+                + opts + "</select>")
+
     known = "".join(
-        '<li>%s (priority %d) '
-        '<form method="POST" style="display:inline">'
-        '<input type="hidden" name="remove_ssid" value="%s">'
-        '<button>remove</button></form></li>'
-        % (n["ssid"], n.get("priority", 0), n["ssid"])
+        '<li>%s (priority %d) <form method=POST style=display:inline>'
+        '<input type=hidden name=remove_ssid value="%s"><button>remove</button></form></li>'
+        % (_esc(n["ssid"]), n.get("priority", 0), _esc(n["ssid"]))
         for n in nets
     ) or "<li><em>none yet</em></li>"
 
-    msg = '<p class="msg">%s</p>' % message if message else ""
-    return (
-        "<!doctype html><html><head><meta charset=utf-8>"
-        "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>Health Bar Setup</title>"
-        "<style>body{font-family:sans-serif;max-width:30em;margin:1em auto;padding:0 1em}"
-        "input,select,button{font-size:1em;padding:.3em;margin:.2em 0;width:100%%}"
-        ".msg{background:#dfd;padding:.5em;border-radius:4px}fieldset{margin:1em 0}</style>"
-        "</head><body><h1>D&amp;D Health Bar</h1>" + msg +
-        "<form method='POST'>"
-        "<fieldset><legend>WiFi</legend>"
-        "<label>Network" + ("<select name=ssid_pick onchange=\"document.getElementById('ssid').value=this.value\">"
-                            "<option value=''>-- scan --</option>" + opts + "</select>" if opts else "") +
-        "<input id=ssid name=ssid placeholder='SSID' value=''></label>"
-        "<label>Password<input name=psk type=password placeholder='WiFi password'></label>"
-        "<label>Priority<input name=priority type=number value='0'></label>"
-        "</fieldset>"
-        "<fieldset><legend>Character</legend>"
-        "<label>D&amp;D Beyond character ID"
-        "<input name=character_id placeholder='e.g. 12345678' value='%s'></label>"
-        "<label>Brightness (0-1)<input name=brightness value='%s'></label>"
-        "</fieldset>"
-        "<button type=submit>Save</button>"
-        "</form>"
-        "<h3>Known networks</h3><ul>%s</ul>"
+    cookie_note = "saved ✓ (leave blank to keep)" if has_cookie else "not set"
+    msg = '<p class="msg">%s</p>' % _esc(message) if message else ""
+
+    parts = [
+        "<!doctype html><html><head><meta charset=utf-8>",
+        "<meta name=viewport content='width=device-width,initial-scale=1'>",
+        "<title>Health Bar Setup</title><style>",
+        "body{font-family:sans-serif;max-width:30em;margin:1em auto;padding:0 1em}",
+        "input,select,button{font-size:1em;padding:.3em;margin:.2em 0;width:100%}",
+        ".msg{background:#dfd;padding:.5em;border-radius:4px}fieldset{margin:1em 0}",
+        "small{color:#666}</style></head><body><h1>D&amp;D Health Bar</h1>",
+        msg,
+        "<form method=POST>",
+        "<fieldset><legend>WiFi</legend><label>Network", scan,
+        "<input id=ssid name=ssid placeholder='SSID'></label>",
+        "<label>Password<input name=psk type=password placeholder='WiFi password'></label>",
+        "<label>Priority<input name=priority type=number value=0></label></fieldset>",
+        "<fieldset><legend>Character</legend>",
+        "<label>D&amp;D Beyond character ID (sheet must be public)",
+        "<input name=character_id placeholder='e.g. 12345678' value=\"%s\"></label>" % _esc(dev.character_id),
+        "<label>Brightness (0-1)<input name=brightness value=\"%s\"></label></fieldset>" % _esc(dev.brightness),
+        "<fieldset><legend>Live updates (optional)</legend>",
+        "<small>Instant updates via your D&amp;D Beyond game log. Needs a campaign. "
+        "The cookie is your account login &mdash; only add it on trusted devices.</small>",
+        "<label>Game ID<input name=game_id value=\"%s\"></label>" % _esc(dev.game_id),
+        "<label>User ID<input name=user_id value=\"%s\"></label>" % _esc(dev.user_id),
+        "<label>Cobalt cookie (%s)<input name=cobalt_cookie type=password></label>" % cookie_note,
+        "</fieldset>",
+        "<button type=submit>Save</button></form>",
+        "<h3>Known networks</h3><ul>", known, "</ul>",
         "<p><small>Add a network and Save; the bar reboots and connects "
-        "automatically. The character sheet must be public.</small></p>"
-        "</body></html>"
-    ) % (dev.character_id, dev.brightness, known)
+        "automatically.</small></p></body></html>",
+    ]
+    return "".join(parts)
 
 
 def _redirect(ip):
@@ -271,10 +298,12 @@ class Portal:
     def _respond(self, method, path, body):
         if method == "POST":
             action = apply_save(parse_form(body), self.data_dir)
-            if action == "wifi":
+            # A new network or character could make RUN mode viable -> reboot so
+            # the supervisor re-evaluates. A bare 'removed' just re-renders.
+            if action in ("wifi", "device"):
                 self._should_reboot = True
                 return _ok_html("<h1>Saved &mdash; rebooting&hellip;</h1>"
-                                "<p>The bar is connecting to WiFi now.</p>")
+                                "<p>The bar is applying your settings now.</p>")
             return _ok_html(render_page(self.data_dir, self._ssids, "Saved."))
         # We only serve the form at "/"; every other path (incl. OS probe URLs)
         # 302-redirects there, which is what triggers the captive-portal sheet.

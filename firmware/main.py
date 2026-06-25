@@ -28,6 +28,7 @@ import wifi
 DATA_DIR = "/data"   # littlefs path on the device
 WDT_TIMEOUT_MS = 8000
 OFFLINE_RESET_SECONDS = 90
+WS_SAFETY_NET_SECONDS = 30  # relaxed poll interval while the websocket is live
 
 
 # ----- platform helpers (degrade gracefully off-device) -------------------
@@ -112,12 +113,35 @@ async def _run_mode(dev, engine, net):
     def on_status(online):
         engine.set_status(anim.ONLINE if online else anim.OFFLINE)
 
+    cookie = config.cobalt_cookie(DATA_DIR)
+    use_ws = bool(dev.game_id and dev.user_id and cookie)
+    fast = dev.poll_seconds
+    slow = max(dev.poll_seconds, WS_SAFETY_NET_SECONDS)
+
+    event = uasyncio.Event() if use_ws else None
     poller = ddb.Poller(
         lambda cid: ddb.fetch_hp(cid), dev.character_id,
         on_hp=on_hp, on_status=on_status,
-        interval=dev.poll_seconds,
+        interval=fast, event=event,
     )
     uasyncio.create_task(poller.run())
+
+    if use_ws:
+        # Live push: relax polling to a safety-net while the socket is healthy;
+        # snap back to responsive polling if it drops (incl. on MemoryError).
+        import auth
+        import ws as wsmod
+
+        def on_ws_state(connected):
+            poller.interval = slow if connected else fast
+            poller.nudge()  # re-evaluate the current wait immediately
+
+        authr = auth.CookieAuth(cookie)
+        listener = wsmod.WSListener(
+            authr.get_token, dev.game_id, dev.user_id,
+            on_nudge=poller.nudge, on_state=on_ws_state,
+        )
+        uasyncio.create_task(listener.run())
 
     bad_since = None
     while True:

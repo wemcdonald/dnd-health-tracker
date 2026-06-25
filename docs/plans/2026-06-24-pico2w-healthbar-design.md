@@ -91,12 +91,42 @@ boot → load config.json/theme.json/wifi.json from /data (littlefs)
    optional websocket push can `nudge()` it for instant fetches, letting the
    interval relax to a slow safety-net when a live session is connected.
 
+## RAM budget for the optional websocket (verified)
+
+We dropped WSS in the first cut to avoid a *second* concurrent TLS session. The
+numbers say it actually fits, so it's added back as an opt-in (gated on a
+configured `game_id`/`user_id`/cookie). MicroPython's mbedtls config
+(`extmod/mbedtls/mbedtls_config_common.h`) sets the record buffers to
+**`IN_CONTENT_LEN` = 16 KB** and **`OUT_CONTENT_LEN` = 4 KB**, so:
+
+- Each established TLS session ≈ **~24–30 KB** resident (20 KB record buffers +
+  context). Handshake adds a transient **~30–50 KB** peak (ECC/bignum scratch),
+  freed once connected. We use `CERT_NONE`, so there is **no CA bundle resident
+  and no chain verification** — that directly trims the handshake peak.
+- The WSS socket is persistent but mostly idle (~28 KB). The poll connection is
+  intermittent (`Connection: close`). They are different hosts, so peak overlap
+  = WSS resident (~28 KB) + one poll handshake (~45 KB) ≈ **~75 KB**, settling to
+  ~28 KB between polls.
+- Pico 2 W free heap is ≈ **~400 KB** (RP2350 has 520 KB SRAM; conservatively
+  ≥350 KB free after firmware + cyw43). So ~75 KB peak is **~20 % of heap — ~5×
+  headroom.**
+
+Conclusion: dual-TLS fits. The real risk is long-run heap **fragmentation** from
+mbedtls alloc/free churn, not absolute size. Mitigations: `gc.collect()` before
+each poll handshake; never buffer WSS frames; and a **graceful-degradation
+guard** — if the WSS task hits `MemoryError` (or any repeated failure), it marks
+itself down and the poller automatically tightens from the slow safety-net
+interval (~30 s) back to the responsive ~5 s, so the bar keeps working. WSS is
+strictly a latency *bonus*, never a dependency. To be confirmed on hardware by
+logging `gc.mem_free()` across a soak with both connections live.
+
 ## Dropped vs. the Go design
 
 - Go → MicroPython · systemd → `main.py` + WDT + reset-on-fault
 - NetworkManager/`nmcli`/`dnsmasq` → cyw43 STA/AP + hand-rolled DNS portal
 - USB-gadget SSH → UF2 firmware + `mpremote` push + AP portal
-- WSS push + Cobalt auth → dropped (poll-only, public-only)
+- WSS push + Cobalt auth → **opt-in** (gated on `game_id`/`user_id`/cookie); the
+  default remains poll-only + public characters
 - TOML → JSON · always-on web UI → setup-mode-only, freed at runtime
 - `rpi-ws281x` cgo (root) → `neopixel`/PIO · full-JSON parse → streaming extractor
 

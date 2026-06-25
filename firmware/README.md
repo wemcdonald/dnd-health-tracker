@@ -18,6 +18,7 @@ flashes and a low-HP heartbeat). Runs bare-metal on a Pico 2 W in MicroPython.
 | `ddb.py` | HTTPS fetch (socket+ssl, chunked-aware) + adaptive poller |
 | `anim.py` / `leds.py` | Animation state machine + WS2812B / terminal-sim backends |
 | `wifi.py` / `portal.py` | Multi-network STA connect; AP captive portal + setup UI |
+| `auth.py` / `ws.py` | *Optional* live updates: Cobalt-token auth + game-log websocket push |
 | `data/*.json` | Default config installed on first push |
 
 ## Two modes
@@ -30,6 +31,19 @@ flashes and a low-HP heartbeat). Runs bare-metal on a Pico 2 W in MicroPython.
 
 They are mutually exclusive so only one memory-heavy subsystem (TLS *or* HTTP
 server) is ever resident — the main RAM lever on the 520 KB device.
+
+## Polling vs. live updates
+
+By default the bar polls HP at a **steady ~5 s** (`poll_seconds`) — no idle
+backoff, so the first hit after a quiet stretch is as responsive as any other.
+
+Optionally, if you fill in **Game ID + User ID + a Cobalt cookie** in the setup
+portal, it also opens your D&D Beyond **game-log websocket** for instant push.
+While that socket is healthy the poll relaxes to a ~30 s safety-net (fewer
+full-sheet downloads); if it drops it snaps back to ~5 s polling. The websocket
+is purely a latency bonus, never a dependency — see the RAM analysis in the
+design doc. The cookie is your full account login, so only add it on trusted
+devices; it's stored in `data/secrets.json` and never shown back in the UI.
 
 ## Flashing & deploying
 

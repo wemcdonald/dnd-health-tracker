@@ -17,7 +17,7 @@ cd "$(dirname "$0")"
 MP=(mpremote)
 [ -n "${DEVICE:-}" ] && MP=(mpremote connect "$DEVICE")
 
-MODULES=(boot.py main.py config.py colors.py hp.py anim.py leds.py ddb.py wifi.py portal.py)
+MODULES=(boot.py main.py config.py colors.py hp.py anim.py leds.py ddb.py wifi.py portal.py auth.py ws.py)
 
 echo "Copying modules…"
 for f in "${MODULES[@]}"; do

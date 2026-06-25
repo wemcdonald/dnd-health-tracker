@@ -21,6 +21,8 @@ import colors
 DEFAULT_DEVICE = {
     "player_name": "",
     "character_id": "",
+    "user_id": "",       # optional, enables the live-update websocket
+    "game_id": "",       # optional, enables the live-update websocket
     "num_leds": 16,
     "gpio_pin": 18,
     "brightness": 0.5,    # hardware brightness 0..1
@@ -51,6 +53,8 @@ class Device:
     def __init__(self, d):
         self.player_name = d.get("player_name", "")
         self.character_id = str(d.get("character_id", "") or "")
+        self.user_id = str(d.get("user_id", "") or "")
+        self.game_id = str(d.get("game_id", "") or "")
         self.num_leds = int(d.get("num_leds") or DEFAULT_DEVICE["num_leds"])
         self.gpio_pin = int(d.get("gpio_pin", DEFAULT_DEVICE["gpio_pin"]))
         self.brightness = float(d.get("brightness", DEFAULT_DEVICE["brightness"]))
@@ -60,6 +64,8 @@ class Device:
         return {
             "player_name": self.player_name,
             "character_id": self.character_id,
+            "user_id": self.user_id,
+            "game_id": self.game_id,
             "num_leds": self.num_leds,
             "gpio_pin": self.gpio_pin,
             "brightness": self.brightness,
@@ -160,3 +166,24 @@ def _sorted_nets(nets):
         nets,
         key=lambda n: (-int(n.get("priority", 0)), n.get("ssid", "")),
     )
+
+
+# ----- secrets (Cobalt cookie for the optional websocket) ------------------
+# Kept out of config.json: it's a full account credential, never echoed back by
+# the web UI. (Flash has no file permissions, but separation still helps.)
+
+def load_secrets(data_dir="data"):
+    try:
+        with open(data_dir + "/secrets.json") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_secrets(secrets, data_dir="data"):
+    _write_json(data_dir + "/secrets.json", secrets)
+
+
+def cobalt_cookie(data_dir="data"):
+    return load_secrets(data_dir).get("cobalt_cookie", "")
