@@ -40,6 +40,7 @@ add_executable(m1_portal
     src/http_poll.c
     src/leds.c
     src/statusd.c
+    src/configform.c
     src/provision.c
     src/dhcpserver.c
     src/dnsserver.c
@@ -74,7 +75,7 @@ target_compile_definitions(m1_portal PRIVATE HEALTHBAR_NAME="${HEALTHBAR_NAME}")
 
 # Poll target. Defaults to production; override for local testing, e.g.
 # -DPOLL_HOST=10.0.10.123 -DPOLL_PORT=8080
-set(POLL_HOST "public.willflix.com" CACHE STRING "Server host the device polls")
+set(POLL_HOST "dndhealth.willflix.org" CACHE STRING "Server host the device polls")
 set(POLL_PORT "80" CACHE STRING "Server port the device polls")
 target_compile_definitions(m1_portal PRIVATE POLL_HOST="${POLL_HOST}" POLL_PORT=${POLL_PORT})
 

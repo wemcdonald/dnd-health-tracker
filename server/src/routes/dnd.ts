@@ -1,5 +1,5 @@
 /**
- * Device-facing endpoint: GET /dnd/:slug.txt
+ * Device-facing endpoint: GET /:slug.txt   (e.g. http://dndhealth.willflix.org/shen.txt)
  *
  * Returns the tiny precomputed file the Pico polls. Line 1 is the ONLY line the
  * device parses (`sscanf(body, "%d %d", &lit, &age_s)`); the rest is human-
@@ -20,9 +20,13 @@ import { getCharacter } from "../db.js";
 const NEVER_AGE_SENTINEL = 99999;
 
 export async function dndRoutes(app: FastifyInstance): Promise<void> {
-  app.get<{ Params: { file: string } }>("/dnd/:file", async (req, reply) => {
+  app.get<{ Params: { file: string } }>("/:file", async (req, reply) => {
     const file = req.params.file;
-    const slug = file.endsWith(".txt") ? file.slice(0, -4) : file;
+    // Only serve *.txt as character files; everything else at root is not ours.
+    if (!file.endsWith(".txt")) {
+      return reply.code(404).type("text/plain; charset=utf-8").send("not found\n");
+    }
+    const slug = file.slice(0, -4);
 
     // 404 only if the slug isn't even registered; a registered-but-not-yet-
     // refreshed character still returns a parseable body (with sentinel age).

@@ -16,7 +16,10 @@
 /* Non-polling arch: MEM_LIBC_MALLOC must be 0 */
 #define MEM_LIBC_MALLOC             0
 #define MEM_ALIGNMENT               4
-#define MEM_SIZE                    4000
+/* Must comfortably exceed TCP_SND_BUF: a tcp_write(...COPY) of the ~3 KB config
+ * page allocates PBUF_RAM from this heap. 4000 (< TCP_SND_BUF) caused ERR_MEM
+ * and dropped connections on the larger page. */
+#define MEM_SIZE                    24000
 
 #define MEMP_NUM_TCP_SEG            32
 #define MEMP_NUM_ARP_QUEUE          10

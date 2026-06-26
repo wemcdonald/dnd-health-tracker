@@ -6,7 +6,7 @@ tiny precomputed file per character that the devices poll over **plain HTTP**.
 
 ## What the device fetches
 
-`GET http://public.willflix.com/dnd/<slug>.txt` → the device parses **line 1 only**:
+`GET http://dndhealth.willflix.org/<slug>.txt` → the device parses **line 1 only**:
 
 ```
 8 2
@@ -30,7 +30,7 @@ Open `http://localhost:8080`, add a character (paste its D&D Beyond URL or id, p
 a slug), then:
 
 ```bash
-curl http://localhost:8080/dnd/<slug>.txt
+curl http://localhost:8080/<slug>.txt
 ```
 
 You should see the `lit age` line within a few seconds. Change HP on the real
@@ -66,9 +66,9 @@ The DB persists in the `tracker-data` volume.
 ### ⚠️ Reverse proxy / TLS
 
 The Pico does **plain HTTP only** — no TLS on device. Whatever fronts
-`public.willflix.com` **must serve `/dnd/*.txt` over `http://` (port 80) without a
+`dndhealth.willflix.org` **must serve `/*.txt` over `http://` (port 80) without a
 forced HTTPS redirect**, or the devices can't fetch. The admin UI can be
-HTTPS-only and/or auth-gated; only `/dnd/*` must stay reachable over plain HTTP.
+HTTPS-only and/or auth-gated; only `/*` must stay reachable over plain HTTP.
 
 ## Security note
 

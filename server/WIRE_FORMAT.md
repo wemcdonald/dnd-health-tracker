@@ -1,7 +1,7 @@
-# `/dnd/<slug>.txt` wire format
+# `/<slug>.txt` wire format
 
 Served over **plain HTTP** (no TLS), `Content-Type: text/plain`. The device fetches
-`http://<host>/dnd/<slug>.txt` every ~2s.
+`http://<host>/<slug>.txt` every ~2s.
 
 ## The only rule that matters
 

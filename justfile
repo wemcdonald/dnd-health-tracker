@@ -23,7 +23,7 @@ default:
 # build the generic firmware (statusd + mDNS + watchdog; no baked identity)
 build:
     cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake -B build -DPICO_BOARD=pico2_w \
-        -DPOLL_HOST=public.willflix.com -DPOLL_PORT=80 -DENABLE_STATUSD=ON \
+        -DPOLL_HOST=dndhealth.willflix.org -DPOLL_PORT=80 -DENABLE_STATUSD=ON \
         -DHEALTHBAR_NAME= -DDEV_SEED_CONFIG=OFF
     cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake --build build -j4 --target m1_portal
 

@@ -44,6 +44,7 @@
 #include "statusd.h"
 #include "boot_mode.h"
 #include "provision.h"
+#include "configform.h"
 
 /* ── Constants ────────────────────────────────────────────────────────────── */
 
@@ -62,7 +63,7 @@
 
 /* Poll target (overridable at build time, e.g. -DPOLL_HOST=10.0.10.123 -DPOLL_PORT=8080). */
 #ifndef POLL_HOST
-#define POLL_HOST "public.willflix.com"
+#define POLL_HOST "dndhealth.willflix.org"
 #endif
 #ifndef POLL_PORT
 #define POLL_PORT 80
@@ -71,106 +72,9 @@
 /* How long to keep an idle HTTP connection open before closing it. */
 #define HTTP_POLL_INTERVAL_S 5
 
-/* ── URL decoder ──────────────────────────────────────────────────────────── */
-
-static int hex_digit(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-    return -1;
-}
-
-/* Decode %xx and '+' in-place. Returns pointer to dst for convenience. */
-static char *url_decode(char *dst, const char *src, size_t dst_size) {
-    size_t out = 0;
-    for (size_t i = 0; src[i] && out + 1 < dst_size; i++) {
-        if (src[i] == '+') {
-            dst[out++] = ' ';
-        } else if (src[i] == '%' && src[i+1] && src[i+2]) {
-            int hi = hex_digit(src[i+1]);
-            int lo = hex_digit(src[i+2]);
-            if (hi >= 0 && lo >= 0) {
-                dst[out++] = (char)((hi << 4) | lo);
-                i += 2;
-            } else {
-                dst[out++] = src[i];
-            }
-        } else {
-            dst[out++] = src[i];
-        }
-    }
-    dst[out] = '\0';
-    return dst;
-}
-
-/* Extract the value of a named key from a '&'-separated query string into the
- * caller-provided buffer (URL-decoded). Writes "" if the key is absent.
- *
- * NOTE: writes into the caller's buffer rather than a shared static one — an
- * earlier version returned a pointer into a single static buffer, so calling it
- * for s/p/r in a row made all three alias the last value (the priority). */
-static void get_param(const char *qs, const char *key, char *out, size_t out_size) {
-    out[0] = '\0';
-    size_t klen = strlen(key);
-    const char *p = qs;
-    while (p && *p) {
-        /* Skip leading & */
-        while (*p == '&') p++;
-        if (strncmp(p, key, klen) == 0 && p[klen] == '=') {
-            const char *val = p + klen + 1;
-            const char *end = strchr(val, '&');
-            size_t vlen = end ? (size_t)(end - val) : strlen(val);
-            char raw[128];
-            if (vlen >= sizeof(raw)) vlen = sizeof(raw) - 1;
-            memcpy(raw, val, vlen);
-            raw[vlen] = '\0';
-            url_decode(out, raw, out_size);
-            return;
-        }
-        /* Advance past this key=value pair. */
-        p = strchr(p, '&');
-    }
-}
-
 /* ── HTML pages ───────────────────────────────────────────────────────────── */
-
-/* Setup form: 3 network groups + slug. Stacked fields, mobile-friendly.
- * Well under TCP_SND_BUF (8*1460), sent in one tcp_write. */
-static const char SETUP_PAGE[] =
-    "HTTP/1.1 200 OK\r\n"
-    "Content-Type: text/html; charset=utf-8\r\n"
-    "Connection: close\r\n"
-    "\r\n"
-    "<!DOCTYPE html><html><head><meta charset=utf-8>"
-    "<meta name=viewport content='width=device-width,initial-scale=1'>"
-    "<title>Healthbar Setup</title><style>"
-    "body{font-family:sans-serif;margin:16px auto;max-width:420px;padding:0 14px;color:#222}"
-    "h2{margin:.2em 0}"
-    "label{display:block;font-weight:bold;font-size:13px;margin-top:10px}"
-    "input{width:100%;padding:10px;margin-top:4px;box-sizing:border-box;font-size:16px}"
-    ".net{margin:0 0 28px;padding:14px;border:1px solid #ccc;border-radius:8px}"
-    ".net b{font-size:14px;color:#555}"
-    "button{width:100%;padding:14px;font-size:16px;margin-top:8px}"
-    "</style></head><body>"
-    "<h2>Healthbar Setup</h2>"
-    "<form method=GET action=/save>"
-    "<div class=net><b>WiFi network 1</b>"
-    "<label>SSID</label><input name=s1 autocapitalize=off autocorrect=off>"
-    "<label>Password</label><input name=p1>"
-    "<label>Priority</label><input name=r1 type=number value=1></div>"
-    "<div class=net><b>WiFi network 2 (optional)</b>"
-    "<label>SSID</label><input name=s2 autocapitalize=off autocorrect=off>"
-    "<label>Password</label><input name=p2>"
-    "<label>Priority</label><input name=r2 type=number value=2></div>"
-    "<div class=net><b>WiFi network 3 (optional)</b>"
-    "<label>SSID</label><input name=s3 autocapitalize=off autocorrect=off>"
-    "<label>Password</label><input name=p3>"
-    "<label>Priority</label><input name=r3 type=number value=3></div>"
-    "<label>Character slug</label>"
-    "<input name=slug value='" HEALTHBAR_NAME "' autocapitalize=off autocorrect=off "
-    "placeholder='e.g. thorin-oakenshield'>"
-    "<button type=submit>Save &amp; Reboot</button>"
-    "</form></body></html>";
+/* The setup form + save logic live in configform.c (shared with the STA status
+ * page). Only the captive-portal catch-all redirect is portal-specific. */
 
 /* Captive-portal catch-all: 200 + meta-refresh. iOS/Android pop "Sign in"
  * more reliably on 200 than on 302. */
@@ -183,27 +87,6 @@ static const char CATCHALL_PAGE[] =
     "<meta http-equiv=refresh content='0; url=http://" AP_IP_ADDR "/'>"
     "</head><body>Redirecting...</body></html>";
 
-static const char SAVED_PAGE[] =
-    "HTTP/1.1 200 OK\r\n"
-    "Content-Type: text/html; charset=utf-8\r\n"
-    "Connection: close\r\n"
-    "\r\n"
-    "<!DOCTYPE html><html><body>"
-    "<h2>Saved &amp; rebooting...</h2>"
-    "<p>Connecting to WiFi. You can close this window.</p>"
-    "</body></html>";
-
-static const char INVALID_PAGE[] =
-    "HTTP/1.1 200 OK\r\n"
-    "Content-Type: text/html; charset=utf-8\r\n"
-    "Connection: close\r\n"
-    "\r\n"
-    "<!DOCTYPE html><html><body>"
-    "<h2>Invalid input</h2>"
-    "<p>At least one SSID and the character slug are required.</p>"
-    "<a href='/'>Back</a>"
-    "</body></html>";
-
 /* ── TCP server state ─────────────────────────────────────────────────────── */
 
 typedef struct {
@@ -215,9 +98,11 @@ typedef struct {
 typedef struct {
     struct tcp_pcb *pcb;
     int sent_len;
-    char request_buf[512];  /* enough for GET line + headers */
-    /* Response to send (points into static strings above). */
-    const char *response;
+    char request_buf[2560]; /* GET line + headers (a 5-network save query is large) */
+    int  req_len;
+    bool handled;
+    char resp[2600];        /* rendered config page (configform_page) */
+    const char *response;   /* -> resp, or a static page like CATCHALL_PAGE */
     int response_len;
     portal_state_t *portal;
 } conn_state_t;
@@ -268,112 +153,64 @@ static void tcp_err_cb(void *arg, err_t err) {
     }
 }
 
-/* ── Form submit handler ──────────────────────────────────────────────────── */
-
-static bool handle_save(const char *qs, portal_state_t *portal) {
-    persist_t cfg = {0};
-
-    char key_s[4], key_p[4], key_r[4];
-    for (int i = 0; i < MAX_NETS; i++) {
-        snprintf(key_s, sizeof(key_s), "s%d", i + 1);
-        snprintf(key_p, sizeof(key_p), "p%d", i + 1);
-        snprintf(key_r, sizeof(key_r), "r%d", i + 1);
-
-        char s[33], p[65], r[8];
-        get_param(qs, key_s, s, sizeof(s));
-        get_param(qs, key_p, p, sizeof(p));
-        get_param(qs, key_r, r, sizeof(r));
-
-        if (s[0] != '\0') {
-            wifi_net_t *n = &cfg.nets[cfg.net_count];
-            strncpy(n->ssid, s, sizeof(n->ssid) - 1);
-            strncpy(n->psk,  p, sizeof(n->psk) - 1);
-            n->priority = (uint8_t)(r[0] ? atoi(r) : (i + 1));
-            cfg.net_count++;
-        }
-    }
-
-    get_param(qs, "slug", cfg.slug, sizeof(cfg.slug));
-
-    /* Validate. */
-    if (cfg.net_count == 0 || cfg.slug[0] == '\0') {
-        return false;
-    }
-
-    printf("\n=== Portal form submit ===\n");
-    printf("slug: %s\n", cfg.slug);
-    for (int i = 0; i < cfg.net_count; i++) {
-        printf("net[%d]: ssid=\"%s\" psk=\"%s\" priority=%d\n",
-               i, cfg.nets[i].ssid, cfg.nets[i].psk, cfg.nets[i].priority);
-    }
-
-    /* M2: persist to flash and confirm it reads back valid. */
-    bool ok = config_save(&cfg);
-    printf("config_save: %s\n", ok ? "OK (persisted to flash)" : "FAILED (crc/readback)");
-    printf("=========================\n");
-    if (!ok) return false;
-
-    portal->reboot_pending = true;
-    return true;
-}
-
 /* ── HTTP receive callback ────────────────────────────────────────────────── */
 
 static err_t tcp_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
     conn_state_t *cs = (conn_state_t *)arg;
 
-    if (!p) {
-        return conn_close(cs, pcb, ERR_OK);
-    }
+    if (!p) return conn_close(cs, pcb, ERR_OK);
 
-    if (p->tot_len > 0) {
-        /* Copy into our buffer (truncate if oversized). */
-        size_t copy_len = p->tot_len;
-        if (copy_len > sizeof(cs->request_buf) - 1)
-            copy_len = sizeof(cs->request_buf) - 1;
-        pbuf_copy_partial(p, cs->request_buf, (u16_t)copy_len, 0);
-        cs->request_buf[copy_len] = '\0';
+    /* Accumulate (a 5-network /save query can span TCP segments). */
+    int space = (int)sizeof(cs->request_buf) - 1 - cs->req_len;
+    int n = (int)p->tot_len;
+    if (n > space) n = space;
+    if (n > 0) {
+        pbuf_copy_partial(p, cs->request_buf + cs->req_len, (u16_t)n, 0);
+        cs->req_len += n;
+        cs->request_buf[cs->req_len] = '\0';
     }
+    tcp_recved(pcb, p->tot_len);
     pbuf_free(p);
-    tcp_recved(pcb, p->tot_len); /* ACK the bytes */
 
-    /* Parse the first line: GET <path>[?<qs>] HTTP/... */
+    if (cs->handled) return ERR_OK;
     if (strncmp(cs->request_buf, "GET ", 4) != 0) {
-        /* Not a GET — just close. */
-        return conn_close(cs, pcb, ERR_OK);
+        /* Only GET is expected; once a line is seen and it isn't GET, drop it. */
+        if (strstr(cs->request_buf, "\r\n")) return conn_close(cs, pcb, ERR_OK);
+        return ERR_OK;
     }
+    if (!strstr(cs->request_buf, "\r\n\r\n")) return ERR_OK;  /* await full request */
+    cs->handled = true;
 
+    /* Parse "GET <path>[?<qs>] HTTP/...". */
     char *path_start = cs->request_buf + 4;
-    char *space = strchr(path_start, ' ');
-    if (space) *space = '\0';
-
+    char *sp = strchr(path_start, ' ');
+    if (sp) *sp = '\0';
     char *qs = strchr(path_start, '?');
-    if (qs) *qs++ = '\0';  /* qs now points to query string, path is clean */
+    if (qs) *qs++ = '\0';
 
-    /* Route: /save = form submit; / = form; everything else = catch-all redirect */
     if (strcmp(path_start, "/save") == 0 && qs) {
-        bool ok = handle_save(qs, cs->portal);
-        cs->response = ok ? SAVED_PAGE : INVALID_PAGE;
+        bool ok = configform_save(qs);
+        cs->response_len = ok
+            ? configform_simple(cs->resp, sizeof(cs->resp), "Saved &amp; rebooting...",
+                                "Connecting to WiFi. You can close this window.")
+            : configform_simple(cs->resp, sizeof(cs->resp), "Save failed",
+                                "At least one network is required. <a href='/'>Back</a>");
+        cs->response = cs->resp;
+        if (ok) cs->portal->reboot_pending = true;
     } else if (strcmp(path_start, "/") == 0 || strcmp(path_start, "/index.html") == 0) {
-        cs->response = SETUP_PAGE;
+        cs->response_len = configform_page(cs->resp, sizeof(cs->resp), false, NULL, NULL);
+        cs->response = cs->resp;
     } else {
         cs->response = CATCHALL_PAGE;
+        cs->response_len = (int)strlen(CATCHALL_PAGE);
     }
-
-    cs->response_len = (int)strlen(cs->response);
     cs->sent_len = 0;
 
     cyw43_arch_lwip_begin();
     err_t write_err = tcp_write(pcb, cs->response, (u16_t)cs->response_len, TCP_WRITE_FLAG_COPY);
-    if (write_err == ERR_OK) {
-        write_err = tcp_output(pcb);
-    }
+    if (write_err == ERR_OK) write_err = tcp_output(pcb);
     cyw43_arch_lwip_end();
-
-    if (write_err != ERR_OK) {
-        return conn_close(cs, pcb, write_err);
-    }
-
+    if (write_err != ERR_OK) return conn_close(cs, pcb, write_err);
     return ERR_OK;
 }
 
@@ -462,7 +299,7 @@ static void idle_ms(uint32_t ms) {
  * The LED render (M5) will consume `lit`; for now we log it. Never returns. */
 static void run_poll_loop(const char *slug) {
     char path[80];
-    snprintf(path, sizeof(path), "/dnd/%s.txt", slug);
+    snprintf(path, sizeof(path), "/%s.txt", slug);
 
     ip_addr_t srv;
     bool resolved = http_resolve(POLL_HOST, &srv, 8000);
@@ -534,7 +371,7 @@ static void run_sta_mode(const persist_t *cfg) {
             printf("STA: connected to \"%s\". IP=%s\n", n->ssid, ip4addr_ntoa(netif_ip4_addr(nif)));
 #ifdef ENABLE_STATUSD
             char poll_desc[96];
-            snprintf(poll_desc, sizeof(poll_desc), "http://%s:%d/dnd/%s.txt",
+            snprintf(poll_desc, sizeof(poll_desc), "http://%s:%d/%s.txt",
                      POLL_HOST, (int)POLL_PORT, cfg->slug);
             statusd_start(cfg->slug, poll_desc);  /* status page + mDNS (opt-in) */
 #endif

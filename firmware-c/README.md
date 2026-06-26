@@ -1,7 +1,7 @@
 # D&D Health Tracker — firmware (C / Pico SDK)
 
 C rewrite of the MicroPython firmware for the Raspberry Pi Pico 2 W (RP2350).
-The device is deliberately dumb: it joins WiFi, polls `http://<server>/dnd/<slug>.txt`
+The device is deliberately dumb: it joins WiFi, polls `http://<server>/<slug>.txt`
 over **plain HTTP** every ~2s, parses one line (`<lit> <age_s>`), and lights
 `lit` of 16 WS2812 LEDs. All the hard work (TLS, HP math, D&D Beyond WSS) lives
 in `../server`.
@@ -14,7 +14,7 @@ runtime, so you build once and provision per device.
 ```bash
 just build                                   # build the generic firmware
 just deploy                                  # flash over USB (no BOOTSEL)
-just set name shen                           # character slug -> healthbar-shen.local, /dnd/shen.txt
+just set name shen                           # character slug -> healthbar-shen.local, /shen.txt
 just set wifi MySSID 'pass' [SSID2 'pass2']  # WiFi networks (priority = order)
 just show                                    # print current on-device config
 ```
@@ -57,7 +57,7 @@ Outputs `build/m0_blink.uf2` (sanity) and `build/m1_portal.uf2` (the real app).
 | option | default | meaning |
 |--------|---------|---------|
 | `HEALTHBAR_NAME` | _(empty)_ | setup-AP SSID becomes `healthbar-setup-<name>`; also the default character slug in the portal form |
-| `POLL_HOST` | `public.willflix.com` | server host the device polls |
+| `POLL_HOST` | `dndhealth.willflix.org` | server host the device polls |
 | `POLL_PORT` | `80` | server port |
 | `ENABLE_STATUSD` | `ON` | STA-mode status web server + mDNS (`healthbar-<slug>.local`). `-DENABLE_STATUSD=OFF` for a minimal build. |
 | `DEV_SEED_CONFIG` | `OFF` | **dev only** — seed wifi config on first boot from `DEV_SEED_SSID/PSK/SLUG` (provision without a phone). Never use for a real build. |
@@ -65,7 +65,7 @@ Outputs `build/m0_blink.uf2` (sanity) and `build/m1_portal.uf2` (the real app).
 ### Production build (normal)
 ```bash
 cmake -B build -DPICO_BOARD=pico2_w -DHEALTHBAR_NAME=shen \
-      -DPOLL_HOST=public.willflix.com -DPOLL_PORT=80
+      -DPOLL_HOST=dndhealth.willflix.org -DPOLL_PORT=80
 cmake --build build -j4
 ```
 First boot has no config → raises the `healthbar-setup-shen` open AP → connect a
@@ -86,14 +86,18 @@ connects.
   *or* AP (portal), split by a reboot — so there is never a scan-while-AP on a cold
   cyw43 (the MicroPython hang). A failed STA connect sets a watchdog-scratch flag and
   reboots into the portal (no retry loop).
-- `config.c`: wifi nets + slug persisted in the last flash sector (magic + CRC32),
-  written only with core1 locked out.
+- `config.c`: wifi nets + slug persisted in the last flash sector (magic + CRC32).
+  Before a write it stops core1 (reset) — every save is followed by a reboot — so
+  no core executes from XIP during erase/program.
 - `http_poll.c`: lwIP raw-TCP plain-HTTP GET, reconnect per poll, `sscanf("%d %d")`.
 - `leds.c`: WS2812 on GPIO18 (16 LEDs), 30 fps; gradient by `lit/16`, low-HP
   heartbeat, damage/heal flash, boot sweep, connecting dot, offline breathing.
-- `statusd.c`: STA-mode status web page (`http://healthbar-<slug>.local/` or the
-  device IP) showing state/lit/age/IP/uptime + a "Reconfigure WiFi" button (reboots
-  into the setup portal via a watchdog-scratch flag). mDNS via lwIP's responder.
+- `statusd.c` + `configform.c`: STA-mode web page at `http://healthbar-<slug>.local/`
+  (or the device IP) — live status (state/lit/age/IP/uptime) plus an **editable
+  config form** (WiFi networks + name), pre-filled from the current flash config and
+  re-read each load; submit persists + reboots (blank password keeps the saved one).
+  The form + save logic in `configform.c` are shared with the AP captive portal.
+  mDNS via lwIP's responder.
 - **Hardware watchdog** (~8s) enabled after cyw43 init, fed by **core0** loops only
   (never core1 — that would mask a core0 hang). The wifi connect uses the async API
   so it feeds while joining. NOTE: it does not false-trip, but recovery-from-hang is

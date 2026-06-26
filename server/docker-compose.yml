@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     ports:
       # Host 80 -> container 8080. The Pico does PLAIN HTTP only, so whatever
-      # fronts public.willflix.com must serve /dnd/*.txt over http:// without a
+      # fronts dndhealth.willflix.org must serve /*.txt over http:// without a
       # forced HTTPS redirect. (Admin UI may be HTTPS-only behind a proxy.)
       - "80:8080"
     environment:
