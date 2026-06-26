@@ -17,9 +17,14 @@ AP_IP = "192.168.4.1"        # Pico W AP default gateway/host IP
 
 
 def _real_sta():
-    import network
+    import network, time
     sta = network.WLAN(network.STA_IF)
     sta.active(True)
+    # The first STA activation triggers the cyw43 firmware cold-load. Let it
+    # settle before any rapid AP/scan radio toggling — otherwise those calls can
+    # block core 0 indefinitely on a cold boot (and core 1 keeps feeding the WDT,
+    # so it never resets; it just hangs with no AP and no USB).
+    time.sleep(0.5)
     return sta
 
 

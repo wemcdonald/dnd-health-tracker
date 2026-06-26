@@ -236,8 +236,11 @@ class Portal:
     def __init__(self, net, data_dir="data", reset=None):
         self.net = net
         self.data_dir = data_dir
-        self.ip = net.start_ap() if net else "192.168.4.1"
+        # Scan while STA is the active interface, BEFORE switching to AP mode.
+        # Scanning STA with the AP already up can hang the cyw43 driver on a cold
+        # boot. scan() is best-effort — it only fills the setup SSID dropdown.
         self._ssids = net.scan() if net else []
+        self.ip = net.start_ap() if net else "192.168.4.1"
         self._reset = reset
         self._should_reboot = False
 
