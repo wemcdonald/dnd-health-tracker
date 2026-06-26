@@ -43,6 +43,8 @@
 #include "http_poll.h"
 #include "health.h"
 #include "leds.h"
+#include "statusd.h"
+#include "boot_mode.h"
 
 /* ── Constants ────────────────────────────────────────────────────────────── */
 
@@ -50,10 +52,8 @@
 #define TCP_PORT    80
 /* MAX_NETS comes from config.h */
 
-/* Written to a watchdog scratch register before rebooting from a failed STA
- * connect, so the next boot raises the portal instead of retrying STA forever.
- * Scratch regs survive a watchdog reboot but reset to 0 on a real power-on. */
-#define PORTAL_FORCE_MAGIC 0x70525430u  /* "pRT0" */
+/* PORTAL_FORCE_MAGIC (watchdog-scratch flag) is defined in boot_mode.h, shared
+ * with the status server's "Reconfigure" button. */
 
 /* Setup-AP suffix, configured at build time: -DHEALTHBAR_NAME=shen.
  * Empty -> SSID is just "healthbar-setup". */
@@ -460,6 +460,7 @@ static void run_poll_loop(const char *slug) {
 
     int last_lit = -1;
     while (true) {
+        watchdog_update();
         if (!resolved) resolved = http_resolve(POLL_HOST, &srv, 8000);
         if (resolved) {
             int lit, age;
@@ -475,6 +476,27 @@ static void run_poll_loop(const char *slug) {
         }
         sleep_ms(2000);
     }
+}
+
+/* Connect to one network using the async API, feeding the watchdog while we wait
+ * (the blocking connect_timeout_ms would starve the watchdog for up to 20s). */
+static bool sta_connect_one(const wifi_net_t *n, uint32_t timeout_ms) {
+    bool open = (n->psk[0] == '\0');
+    int rc = cyw43_arch_wifi_connect_async(
+        n->ssid, open ? NULL : n->psk,
+        open ? CYW43_AUTH_OPEN : CYW43_AUTH_WPA2_AES_PSK);
+    if (rc != 0) return false;
+
+    absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
+    while (absolute_time_diff_us(get_absolute_time(), deadline) > 0) {
+        watchdog_update();
+        int st = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+        if (st == CYW43_LINK_UP) return true;
+        if (st < 0) return false;   /* LINK_FAIL / NONET / BADAUTH */
+        cyw43_arch_poll();
+        sleep_ms(50);
+    }
+    return false;  /* timeout */
 }
 
 /* Connect to a stored network (priority order), then poll the server.
@@ -496,16 +518,18 @@ static void run_sta_mode(const persist_t *cfg) {
     for (int k = 0; k < cfg->net_count; k++) {
         const wifi_net_t *n = &cfg->nets[order[k]];
         printf("STA: connecting to \"%s\" (priority %d)...\n", n->ssid, n->priority);
-        bool open = (n->psk[0] == '\0');
-        int rc = cyw43_arch_wifi_connect_timeout_ms(
-            n->ssid, open ? NULL : n->psk,
-            open ? CYW43_AUTH_OPEN : CYW43_AUTH_WPA2_AES_PSK, 20000);
-        if (rc == 0) {
+        if (sta_connect_one(n, 20000)) {
             struct netif *nif = &cyw43_state.netif[CYW43_ITF_STA];
             printf("STA: connected to \"%s\". IP=%s\n", n->ssid, ip4addr_ntoa(netif_ip4_addr(nif)));
-            run_poll_loop(cfg->slug);  /* M4: never returns */
+#ifdef ENABLE_STATUSD
+            char poll_desc[96];
+            snprintf(poll_desc, sizeof(poll_desc), "http://%s:%d/dnd/%s.txt",
+                     POLL_HOST, (int)POLL_PORT, cfg->slug);
+            statusd_start(cfg->slug, poll_desc);  /* status page + mDNS (opt-in) */
+#endif
+            run_poll_loop(cfg->slug);              /* M4: never returns */
         }
-        printf("STA: connect to \"%s\" failed (rc=%d)\n", n->ssid, rc);
+        printf("STA: connect to \"%s\" failed\n", n->ssid);
     }
     reboot_to_portal();
 }
@@ -547,6 +571,7 @@ static void run_portal(void) {
     printf("Portal running. Connect to '%s' and visit http://%s/\n", ap_name, AP_IP_ADDR);
 
     while (!portal.reboot_pending) {
+        watchdog_update();
         cyw43_arch_poll();
         sleep_ms(10);
     }
@@ -614,6 +639,12 @@ int main(void) {
      * core1 only touches the LED PIO + shared health state. */
     health_init();
     leds_launch();
+
+    /* Hardware watchdog: a genuine core0 hang/panic reboots after ~8s instead of
+     * bricking until a manual BOOTSEL. Fed by core0's loops only — NOT core1:
+     * feeding from the always-running render core would mask a core0 hang (the
+     * bug the MicroPython build had). Long ops (wifi connect, HTTP) feed as they wait. */
+    watchdog_enable(8000, true);
 
     if (have && !force_portal) {
         printf("Booting STA mode.\n");

@@ -35,6 +35,7 @@ Outputs `build/m0_blink.uf2` (sanity) and `build/m1_portal.uf2` (the real app).
 | `HEALTHBAR_NAME` | _(empty)_ | setup-AP SSID becomes `healthbar-setup-<name>`; also the default character slug in the portal form |
 | `POLL_HOST` | `public.willflix.com` | server host the device polls |
 | `POLL_PORT` | `80` | server port |
+| `ENABLE_STATUSD` | `ON` | STA-mode status web server + mDNS (`healthbar-<slug>.local`). `-DENABLE_STATUSD=OFF` for a minimal build. |
 | `DEV_SEED_CONFIG` | `OFF` | **dev only** — seed wifi config on first boot from `DEV_SEED_SSID/PSK/SLUG` (provision without a phone). Never use for a real build. |
 
 ### Production build (normal)
@@ -66,6 +67,12 @@ connects.
 - `http_poll.c`: lwIP raw-TCP plain-HTTP GET, reconnect per poll, `sscanf("%d %d")`.
 - `leds.c`: WS2812 on GPIO18 (16 LEDs), 30 fps; gradient by `lit/16`, low-HP
   heartbeat, damage/heal flash, boot sweep, connecting dot, offline breathing.
+- `statusd.c`: STA-mode status web page (`http://healthbar-<slug>.local/` or the
+  device IP) showing state/lit/age/IP/uptime + a "Reconfigure WiFi" button (reboots
+  into the setup portal via a watchdog-scratch flag). mDNS via lwIP's responder.
+- **Hardware watchdog** (~8s) enabled after cyw43 init, fed by **core0** loops only
+  (never core1 — that would mask a core0 hang). A genuine hang/panic reboots instead
+  of bricking. The wifi connect uses the async API so it feeds while joining.
 
 ## Milestone status (verified on hardware unless noted)
 
@@ -77,6 +84,7 @@ connects.
 | M3 | STA connect to real WiFi (cold-boot fix) | ✅ |
 | M4 | HTTP poll — full device→server→DDB loop + offline/recovery | ✅ |
 | M5 | LED render engine | ⏳ builds + runs (no regression to M1–M4); **LED visuals unverified — no strip wired yet** |
+| — | status server + mDNS (`healthbar-<slug>.local`) + hardware watchdog | ✅ verified: page serves live state, mDNS resolves, watchdog stable (no false reboot) |
 
 To verify M5: wire a 16-LED WS2812 strip to **GPIO18** (+5V, GND), flash, and
 watch the bar track HP (full = green, low = red + heartbeat, damage = red flash,

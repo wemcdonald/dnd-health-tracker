@@ -49,6 +49,14 @@
 #define LWIP_UDP                    1
 #define LWIP_DNS                    1
 #define LWIP_TCP_KEEPALIVE          1
+
+/* mDNS responder (healthbar-<slug>.local) — needs IGMP + a netif client slot.
+ * mDNS registers extra sys timeouts that aren't counted in the auto-computed
+ * default, so bump the pool explicitly (panic "MEMP_SYS_TIMEOUT is empty"). */
+#define LWIP_IGMP                   1
+#define LWIP_MDNS_RESPONDER         1
+#define LWIP_NUM_NETIF_CLIENT_DATA  1
+#define MEMP_NUM_SYS_TIMEOUT        24
 #define LWIP_NETIF_TX_SINGLE_PBUF   1
 #define DHCP_DOES_ARP_CHECK         0
 #define LWIP_DHCP_DOES_ACD_CHECK    0

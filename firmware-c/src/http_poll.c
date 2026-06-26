@@ -13,6 +13,7 @@
 
 #include "pico/stdlib.h"
 #include "pico/cyw43_arch.h"
+#include "hardware/watchdog.h"
 #include "lwip/tcp.h"
 #include "lwip/dns.h"
 
@@ -46,6 +47,7 @@ bool http_resolve(const char *host, ip_addr_t *out, uint32_t timeout_ms) {
 
     absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
     while (!ctx.done && absolute_time_diff_us(get_absolute_time(), deadline) > 0) {
+        watchdog_update();
         cyw43_arch_poll();
         sleep_ms(5);
     }
@@ -124,6 +126,7 @@ bool http_poll_once(const ip_addr_t *ip, uint16_t port, const char *host,
 
     absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
     while (!ctx.done && absolute_time_diff_us(get_absolute_time(), deadline) > 0) {
+        watchdog_update();
         cyw43_arch_poll();
         sleep_ms(5);
     }

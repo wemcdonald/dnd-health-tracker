@@ -39,6 +39,7 @@ add_executable(m1_portal
     src/config.c
     src/http_poll.c
     src/leds.c
+    src/statusd.c
     src/dhcpserver.c
     src/dnsserver.c
 )
@@ -59,6 +60,7 @@ target_link_libraries(m1_portal
     pico_cyw43_arch_lwip_threadsafe_background
     pico_stdlib
     pico_multicore
+    pico_lwip_mdns
     hardware_flash
     hardware_sync
     hardware_pio
@@ -74,6 +76,13 @@ target_compile_definitions(m1_portal PRIVATE HEALTHBAR_NAME="${HEALTHBAR_NAME}")
 set(POLL_HOST "public.willflix.com" CACHE STRING "Server host the device polls")
 set(POLL_PORT "80" CACHE STRING "Server port the device polls")
 target_compile_definitions(m1_portal PRIVATE POLL_HOST="${POLL_HOST}" POLL_PORT=${POLL_PORT})
+
+# STA-mode status web server + mDNS (healthbar-<slug>.local). Opt-in: it pulls in
+# the lwIP mDNS responder. Build -DENABLE_STATUSD=OFF for the minimal/safe firmware.
+option(ENABLE_STATUSD "Status web server + mDNS in STA mode" ON)
+if(ENABLE_STATUSD)
+    target_compile_definitions(m1_portal PRIVATE ENABLE_STATUSD)
+endif()
 
 # DEV-ONLY provisioning seed (for bring-up without a phone). Never commit creds;
 # pass on the command line: -DDEV_SEED_CONFIG=ON -DDEV_SEED_SSID=.. -DDEV_SEED_PSK=.. -DDEV_SEED_SLUG=..
