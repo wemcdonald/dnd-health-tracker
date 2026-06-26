@@ -1,0 +1,91 @@
+cmake_minimum_required(VERSION 3.17)
+
+# Board must be set BEFORE pico_sdk_init().
+# pico2_w selects RP2350 + cyw43 radio support.
+set(PICO_BOARD pico2_w CACHE STRING "Board type")
+
+# Pull in Pico SDK (must be before project()).
+include(pico_sdk_import.cmake)
+
+project(healthbar C CXX ASM)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+
+# Initialise the Pico SDK.
+pico_sdk_init()
+
+# ─── M0: blink + dual stdio ──────────────────────────────────────────────────
+add_executable(m0_blink
+    src/m0_blink.c
+)
+
+target_include_directories(m0_blink PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+
+target_link_libraries(m0_blink
+    pico_stdlib
+    pico_cyw43_arch_none        # cyw43 driver without lwIP (just for LED GPIO)
+)
+
+pico_enable_stdio_usb(m0_blink 1)   # USB-CDC printf
+pico_enable_stdio_uart(m0_blink 1)  # UART printf (independent of USB; use picoprobe)
+pico_add_extra_outputs(m0_blink)    # produces .uf2 and .elf
+
+# ─── M1: captive portal ──────────────────────────────────────────────────────
+add_executable(m1_portal
+    src/portal.c
+    src/config.c
+    src/http_poll.c
+    src/leds.c
+    src/dhcpserver.c
+    src/dnsserver.c
+)
+
+pico_generate_pio_header(m1_portal ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
+
+target_include_directories(m1_portal PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}           # lwipopts.h lives here
+    ${CMAKE_CURRENT_LIST_DIR}/src       # dhcpserver.h, dnsserver.h
+)
+
+# Configure AP IP address via the pico-sdk helper.
+pico_configure_ip4_address(m1_portal PRIVATE
+    CYW43_DEFAULT_IP_AP_ADDRESS 192.168.4.1
+)
+
+target_link_libraries(m1_portal
+    pico_cyw43_arch_lwip_threadsafe_background
+    pico_stdlib
+    pico_multicore
+    hardware_flash
+    hardware_sync
+    hardware_pio
+)
+
+# Setup-AP name suffix. Build with -DHEALTHBAR_NAME=shen -> SSID "healthbar-setup-shen".
+# Empty -> SSID is just "healthbar-setup".
+set(HEALTHBAR_NAME "" CACHE STRING "Setup-AP suffix; SSID becomes healthbar-setup-<name>")
+target_compile_definitions(m1_portal PRIVATE HEALTHBAR_NAME="${HEALTHBAR_NAME}")
+
+# Poll target. Defaults to production; override for local testing, e.g.
+# -DPOLL_HOST=10.0.10.123 -DPOLL_PORT=8080
+set(POLL_HOST "public.willflix.com" CACHE STRING "Server host the device polls")
+set(POLL_PORT "80" CACHE STRING "Server port the device polls")
+target_compile_definitions(m1_portal PRIVATE POLL_HOST="${POLL_HOST}" POLL_PORT=${POLL_PORT})
+
+# DEV-ONLY provisioning seed (for bring-up without a phone). Never commit creds;
+# pass on the command line: -DDEV_SEED_CONFIG=ON -DDEV_SEED_SSID=.. -DDEV_SEED_PSK=.. -DDEV_SEED_SLUG=..
+option(DEV_SEED_CONFIG "Seed a wifi config on first boot from build-time creds" OFF)
+if(DEV_SEED_CONFIG)
+    target_compile_definitions(m1_portal PRIVATE
+        DEV_SEED_CONFIG
+        DEV_SEED_SSID="${DEV_SEED_SSID}"
+        DEV_SEED_PSK="${DEV_SEED_PSK}"
+        DEV_SEED_SLUG="${DEV_SEED_SLUG}")
+endif()
+
+pico_enable_stdio_usb(m1_portal 1)
+pico_enable_stdio_uart(m1_portal 1)
+pico_add_extra_outputs(m1_portal)

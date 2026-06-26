@@ -1,0 +1,19 @@
+services:
+  tracker:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Host 80 -> container 8080. The Pico does PLAIN HTTP only, so whatever
+      # fronts public.willflix.com must serve /dnd/*.txt over http:// without a
+      # forced HTTPS redirect. (Admin UI may be HTTPS-only behind a proxy.)
+      - "80:8080"
+    environment:
+      - PORT=8080
+      - DB_PATH=/data/tracker.db
+      # Optional light guard for the admin UI (cobalt cookie is sensitive):
+      # - ADMIN_PASSWORD=change-me
+    volumes:
+      - tracker-data:/data
+
+volumes:
+  tracker-data:

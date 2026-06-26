@@ -1,0 +1,3 @@
+# CMake build tree (artifacts, generated PIO headers, and dev .elf/.uf2 that may
+# contain build-time creds — never commit).
+build/
