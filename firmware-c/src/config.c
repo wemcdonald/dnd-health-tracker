@@ -42,7 +42,9 @@ bool config_load(persist_t *out) {
     const persist_t *flash = (const persist_t *)(XIP_BASE + FLASH_TARGET_OFFSET);
     if (flash->magic != CONFIG_MAGIC) return false;
     if (flash->version != CONFIG_VERSION) return false;
-    if (flash->net_count == 0 || flash->net_count > MAX_NETS) return false;
+    /* 0 nets is valid (e.g. `set name` before `set wifi`) — caller decides what
+     * to do with no networks (we raise the portal). */
+    if (flash->net_count > MAX_NETS) return false;
     uint32_t want = crc32_calc((const uint8_t *)flash, offsetof(persist_t, crc32));
     if (want != flash->crc32) return false;
     memcpy(out, flash, sizeof(*out));
@@ -59,14 +61,16 @@ bool config_save(persist_t *cfg) {
     memset(buf, 0xFF, sizeof(buf));
     memcpy(buf, cfg, sizeof(*cfg));
 
-    /* If core1 is running it executes from XIP flash, so it must be parked
-     * during the erase/program. Lock it out first, then disable core0 IRQs. */
-    if (s_core1_running) multicore_lockout_start_blocking();
+    /* If core1 is running it executes from XIP flash, which must be quiescent
+     * during erase/program. Every config_save is immediately followed by a
+     * reboot, so we simply STOP core1 (reset it) rather than do the
+     * lockout-handshake dance (which deadlocked on hardware). After this only
+     * core0 runs, so disabling core0 IRQs makes the flash op safe. */
+    if (s_core1_running) multicore_reset_core1();
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_program(FLASH_TARGET_OFFSET, buf, CONFIG_PROG_SIZE);
     restore_interrupts(ints);
-    if (s_core1_running) multicore_lockout_end_blocking();
 
     persist_t check;
     return config_load(&check);

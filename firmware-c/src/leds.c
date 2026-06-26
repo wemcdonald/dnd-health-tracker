@@ -185,8 +185,8 @@ static void render(const health_t *h, uint32_t now_ms, int *prev_lit,
 /* ── core1 entry ──────────────────────────────────────────────────────────── */
 
 static void core1_main(void) {
-    /* Allow core0 to park us during flash writes (config_save). */
-    multicore_lockout_victim_init();
+    /* config_save stops us via multicore_reset_core1() before a flash write
+     * (always followed by a reboot), so no lockout-victim registration needed. */
     config_set_core1_running(true);
 
     uint offset = pio_add_program(s_pio, &ws2812_program);

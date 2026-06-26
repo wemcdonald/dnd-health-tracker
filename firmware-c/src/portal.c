@@ -13,10 +13,8 @@
  *   - AP-only epoch. STA connect lives in a separate reboot epoch (M3+).
  *   - lwIP raw API calls bracketed with cyw43_arch_lwip_begin/end.
  *
- * M1 behaviour on form submit:
- *   Parses and PRINTS the captured values over serial, returns a "Saved
- *   (M1: not yet persisted), rebooting..." page, then calls watchdog_reboot.
- *   Flash persistence is M2.
+ * On form submit: parses the values, persists them to flash (config_save),
+ * returns a "Saved & rebooting" page, then reboots into STA mode.
  *
  * HTML form: <1.5 KB so it fits in one lwIP TCP segment (TCP_MSS=1460).
  *
@@ -45,6 +43,7 @@
 #include "leds.h"
 #include "statusd.h"
 #include "boot_mode.h"
+#include "provision.h"
 
 /* ── Constants ────────────────────────────────────────────────────────────── */
 
@@ -190,8 +189,8 @@ static const char SAVED_PAGE[] =
     "Connection: close\r\n"
     "\r\n"
     "<!DOCTYPE html><html><body>"
-    "<h2>Saved (M1: not yet persisted), rebooting...</h2>"
-    "<p>You can close this window.</p>"
+    "<h2>Saved &amp; rebooting...</h2>"
+    "<p>Connecting to WiFi. You can close this window.</p>"
     "</body></html>";
 
 static const char INVALID_PAGE[] =
@@ -447,6 +446,18 @@ static void reboot_to_portal(void) {
     while (true) tight_loop_contents();
 }
 
+/* Sleep ~ms while staying responsive: feed the watchdog, service USB-serial
+ * provisioning, and pump lwIP. */
+static void idle_ms(uint32_t ms) {
+    absolute_time_t end = make_timeout_time_ms(ms);
+    while (absolute_time_diff_us(get_absolute_time(), end) > 0) {
+        watchdog_update();
+        provision_poll();
+        cyw43_arch_poll();
+        sleep_ms(50);
+    }
+}
+
 /* M4: poll the server for "<lit> <age>" every ~2s and report over serial.
  * The LED render (M5) will consume `lit`; for now we log it. Never returns. */
 static void run_poll_loop(const char *slug) {
@@ -474,7 +485,7 @@ static void run_poll_loop(const char *slug) {
                 health_set_state(ST_OFFLINE);
             }
         }
-        sleep_ms(2000);
+        idle_ms(2000);  /* responsive: feeds watchdog + handles provisioning */
     }
 }
 
@@ -572,6 +583,7 @@ static void run_portal(void) {
 
     while (!portal.reboot_pending) {
         watchdog_update();
+        provision_poll();   /* allow `just set ...` over USB while unprovisioned */
         cyw43_arch_poll();
         sleep_ms(10);
     }
@@ -644,14 +656,16 @@ int main(void) {
      * bricking until a manual BOOTSEL. Fed by core0's loops only — NOT core1:
      * feeding from the always-running render core would mask a core0 hang (the
      * bug the MicroPython build had). Long ops (wifi connect, HTTP) feed as they wait. */
-    watchdog_enable(8000, true);
+    watchdog_enable(8000, false);  /* pause_on_debug=false: always count, even if SWD is sensed */
 
-    if (have && !force_portal) {
+    if (have && cfg.net_count > 0 && !force_portal) {
         printf("Booting STA mode.\n");
         run_sta_mode(&cfg);     /* connects + holds, or reboots to portal; never returns */
     } else {
         if (force_portal)
             printf("Forced into setup portal (previous STA attempts failed).\n");
+        else if (have && cfg.net_count == 0)
+            printf("Config has a slug but no WiFi — raising portal (use `just set wifi`).\n");
         run_portal();           /* AP + captive portal; reboots once config is saved */
     }
     return 0;

@@ -6,6 +6,30 @@ over **plain HTTP** every ~2s, parses one line (`<lit> <age_s>`), and lights
 `lit` of 16 WS2812 LEDs. All the hard work (TLS, HP math, D&D Beyond WSS) lives
 in `../server`.
 
+## Quick start (`just`)
+
+The firmware is **generic** — identity (character slug + WiFi) is provisioned at
+runtime, so you build once and provision per device.
+
+```bash
+just build                                   # build the generic firmware
+just deploy                                  # flash over USB (no BOOTSEL)
+just set name shen                           # character slug -> healthbar-shen.local, /dnd/shen.txt
+just set wifi MySSID 'pass' [SSID2 'pass2']  # WiFi networks (priority = order)
+just show                                    # print current on-device config
+```
+
+Provisioning works two ways (both persist to flash):
+- **Captive portal** (most reliable): on a device with no config, join the open
+  `healthbar-setup` AP, fill the web form. **Recommended.**
+- **USB serial** (`just set ...`): convenient, no AP join — but USB-CDC serial can
+  be flaky on some hosts; if a `set` seems not to take, re-run or use the portal,
+  and confirm via the status page (below).
+
+**Observability:** the status page at `http://healthbar-<slug>.local/` shows live
+state, lit/16, upstream age, IP, and uptime — use it instead of serial (the cyw43
+build's USB-CDC *output* is unreliable on some hosts; the device still works).
+
 ## Toolchain (macOS)
 
 ```bash
@@ -71,8 +95,16 @@ connects.
   device IP) showing state/lit/age/IP/uptime + a "Reconfigure WiFi" button (reboots
   into the setup portal via a watchdog-scratch flag). mDNS via lwIP's responder.
 - **Hardware watchdog** (~8s) enabled after cyw43 init, fed by **core0** loops only
-  (never core1 — that would mask a core0 hang). A genuine hang/panic reboots instead
-  of bricking. The wifi connect uses the async API so it feeds while joining.
+  (never core1 — that would mask a core0 hang). The wifi connect uses the async API
+  so it feeds while joining. NOTE: it does not false-trip, but recovery-from-hang is
+  unverified on RP2350 (it did not fire during one deliberate hang — the RP2350
+  watchdog tick setup may need attention). The real anti-brick fix is that
+  `config_save` no longer deadlocks; the watchdog is a best-effort net.
+- **USB-serial provisioning** (`provision.c`): `name`/`wifi`/`show`/`reboot` line
+  commands on USB-CDC; `name`/`wifi` save to flash and reboot. `config_save` stops
+  core1 (reset) before the flash write — every save is followed by a reboot — which
+  avoids the multicore-lockout deadlock that previously froze the board and corrupted
+  the config sector.
 
 ## Milestone status (verified on hardware unless noted)
 
@@ -84,7 +116,9 @@ connects.
 | M3 | STA connect to real WiFi (cold-boot fix) | ✅ |
 | M4 | HTTP poll — full device→server→DDB loop + offline/recovery | ✅ |
 | M5 | LED render engine | ⏳ builds + runs (no regression to M1–M4); **LED visuals unverified — no strip wired yet** |
-| — | status server + mDNS (`healthbar-<slug>.local`) + hardware watchdog | ✅ verified: page serves live state, mDNS resolves, watchdog stable (no false reboot) |
+| — | status server + mDNS (`healthbar-<slug>.local`) | ✅ verified: page serves live state, mDNS resolves |
+| — | provisioning (captive portal + USB `just set`) | ✅ portal verified end-to-end (persist→connect→mDNS); USB serial works but flaky on some hosts |
+| — | hardware watchdog | ⚠️ enabled, no false-trip; recovery-from-hang unverified on RP2350 |
 
 To verify M5: wire a 16-LED WS2812 strip to **GPIO18** (+5V, GND), flash, and
 watch the bar track HP (full = green, low = red + heartbeat, damage = red flash,

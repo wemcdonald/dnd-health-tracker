@@ -40,6 +40,7 @@ add_executable(m1_portal
     src/http_poll.c
     src/leds.c
     src/statusd.c
+    src/provision.c
     src/dhcpserver.c
     src/dnsserver.c
 )
