@@ -14,7 +14,8 @@ void leds_launch(void);
 /* DIAG (M5 bring-up): snapshot of core1's own render loop, so core0 can show
  * whether core1 is actually alive and what it last rendered (vs. what core0
  * wrote into the shared health state). `frames` advances once per rendered
- * frame; if it's frozen, core1 has stopped. */
-void leds_diag(uint32_t *frames, int *last_state, int *last_lit);
+ * frame; if it's frozen, core1 has stopped. `last_cur` is the current HP core1
+ * last rendered. */
+void leds_diag(uint32_t *frames, int *last_state, int *last_cur);
 
 #endif /* HEALTHBAR_LEDS_H */

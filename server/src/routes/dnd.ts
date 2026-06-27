@@ -2,22 +2,43 @@
  * Device-facing endpoint: GET /:slug.txt   (e.g. http://dndhealth.willflix.org/shen.txt)
  *
  * Returns the tiny precomputed file the Pico polls. Line 1 is the ONLY line the
- * device parses (`sscanf(body, "%d %d", &lit, &age_s)`); the rest is human-
- * readable for browser spot-checking.
+ * device parses (`sscanf(body, "%d %d %d %d", &cur, &max, &temp, &age_s)`); the
+ * rest is human-readable for browser spot-checking.
  *
- *   <lit> <age_s>
+ *   <cur> <max> <temp> <age_s>
  *   HP <cur>/<max> (+<temp> temp) · <pct>%
  *
- * `age_s` is seconds since the server last successfully refreshed from D&D Beyond
- * (upstream staleness). A character that has never refreshed yet returns a large
- * sentinel age so the device can show a stale/offline tint.
+ * - `cur`  current HP (0..max).
+ * - `max`  max HP (>= 1 for a live character).
+ * - `temp` temporary HP — a separate buffer on top of `cur` (depleted first by
+ *          damage, can exceed max, doesn't heal). Carried for the device's
+ *          reactive animations; NOT part of the steady fill.
+ * - `age_s` seconds since the server last successfully refreshed from D&D Beyond
+ *          (upstream staleness). A character that has never refreshed yet returns
+ *          the sentinel line `0 0 0 99999` so the device can show a stale/offline
+ *          tint.
  */
 
 import type { FastifyInstance } from "fastify";
-import { getLiveState, touchCharacter } from "../manager.js";
+import { getLiveState, touchCharacter, type LiveState } from "../manager.js";
 import { getCharacter } from "../db.js";
 
 const NEVER_AGE_SENTINEL = 99999;
+
+/**
+ * Format the full device file body for a character. Pure so it can be unit
+ * tested against the wire format the firmware parses. `state` is undefined when
+ * the character is registered but has no manager yet; a never-refreshed state
+ * (lastUpstreamSuccessMs === 0) gets the sentinel line.
+ */
+export function formatDeviceFile(state: Readonly<LiveState> | undefined, now: number): string {
+  if (!state || state.lastUpstreamSuccessMs === 0) {
+    return `0 0 0 ${NEVER_AGE_SENTINEL}\nHP unknown (no upstream data yet)\n`;
+  }
+  const ageS = Math.floor((now - state.lastUpstreamSuccessMs) / 1000);
+  const human = `HP ${state.cur}/${state.max} (+${state.temp} temp) · ${state.pct}%`;
+  return `${state.cur} ${state.max} ${state.temp} ${ageS}\n${human}\n`;
+}
 
 export async function dndRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { file: string } }>("/:file", async (req, reply) => {
@@ -38,17 +59,10 @@ export async function dndRoutes(app: FastifyInstance): Promise<void> {
     // wakes it (with an immediate refetch) if it had gone idle.
     touchCharacter(slug);
 
-    const state = getLiveState(slug);
     reply
       .type("text/plain; charset=utf-8")
       .header("Cache-Control", "no-store");
 
-    if (!state || state.lastUpstreamSuccessMs === 0) {
-      return reply.send(`0 ${NEVER_AGE_SENTINEL}\nHP unknown (no upstream data yet)\n`);
-    }
-
-    const ageS = Math.floor((Date.now() - state.lastUpstreamSuccessMs) / 1000);
-    const human = `HP ${state.cur}/${state.max} (+${state.temp} temp) · ${state.pct}%`;
-    return reply.send(`${state.lit} ${ageS}\n${human}\n`);
+    return reply.send(formatDeviceFile(getLiveState(slug), Date.now()));
   });
 }

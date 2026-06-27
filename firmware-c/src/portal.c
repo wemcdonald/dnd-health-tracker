@@ -295,8 +295,8 @@ static void idle_ms(uint32_t ms) {
     }
 }
 
-/* M4: poll the server for "<lit> <age>" every ~2s and report over serial.
- * The LED render (M5) will consume `lit`; for now we log it. Never returns. */
+/* Poll the server for "<cur> <max> <temp> <age>" every ~2s and drive the LED bar.
+ * The device derives the bar fill from cur/max (see leds.c). Never returns. */
 static void run_poll_loop(const char *slug) {
     char path[80];
     snprintf(path, sizeof(path), "/%s.txt", slug);
@@ -306,17 +306,18 @@ static void run_poll_loop(const char *slug) {
     printf("poll: target http://%s:%d%s (resolve %s)\n",
            POLL_HOST, (int)POLL_PORT, path, resolved ? "ok" : "FAILED");
 
-    int last_lit = -1;
+    int last_cur = -1;
     while (true) {
         watchdog_update();
         if (!resolved) resolved = http_resolve(POLL_HOST, &srv, 8000);
         if (resolved) {
-            int lit, age;
-            if (http_poll_once(&srv, (uint16_t)POLL_PORT, POLL_HOST, path, &lit, &age, 4000)) {
-                printf("poll: lit=%d age=%ds%s\n", lit, age,
-                       lit != last_lit ? "  <-- changed" : "");
-                health_set_lit(lit, age);   /* M5: drives the LED bar */
-                last_lit = lit;
+            int cur, max, temp, age;
+            if (http_poll_once(&srv, (uint16_t)POLL_PORT, POLL_HOST, path,
+                               &cur, &max, &temp, &age, 4000)) {
+                printf("poll: cur=%d max=%d temp=%d age=%ds%s\n", cur, max, temp, age,
+                       cur != last_cur ? "  <-- changed" : "");
+                health_set_hp(cur, max, temp, age);   /* drives the LED bar */
+                last_cur = cur;
             } else {
                 printf("poll: FAILED (offline)\n");
                 health_set_state(ST_OFFLINE);

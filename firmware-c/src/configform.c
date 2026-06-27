@@ -105,8 +105,8 @@ int configform_page(char *out, int cap, bool with_status, const char *slug, cons
 
     if (with_status) {
         health_t h = health_snapshot();
-        uint32_t c1_frames; int c1_state, c1_lit;
-        leds_diag(&c1_frames, &c1_state, &c1_lit);
+        uint32_t c1_frames; int c1_state, c1_cur;
+        leds_diag(&c1_frames, &c1_state, &c1_cur);
         uint32_t up = to_ms_since_boot(get_absolute_time()) / 1000;
         const char *ip = ip4addr_ntoa(netif_ip4_addr(&cyw43_state.netif[CYW43_ITF_STA]));
         char slug_esc[64];
@@ -114,15 +114,15 @@ int configform_page(char *out, int cap, bool with_status, const char *slug, cons
         n += snprintf(out + n, cap - n,
             "<h2>healthbar: %s</h2><table>"
             "<tr><td>state</td><td><b>%s</b></td></tr>"
-            "<tr><td>LEDs lit</td><td>%d / %d</td></tr>"
+            "<tr><td>HP</td><td>%d / %d (+%d temp)</td></tr>"
             "<tr><td>upstream age</td><td>%d s</td></tr>"
             "<tr><td>IP</td><td>%s</td></tr>"
             "<tr><td>polling</td><td><small>%s</small></td></tr>"
             "<tr><td>uptime</td><td>%lu s</td></tr>"
-            "<tr><td>core1</td><td>frames=%lu, last %s %d/%d</td></tr></table>",
-            slug_esc, state_str(h.state), h.lit, NUM_LEDS, h.age_s, ip,
+            "<tr><td>core1</td><td>frames=%lu, last %s cur=%d</td></tr></table>",
+            slug_esc, state_str(h.state), h.cur, h.max, h.temp, h.age_s, ip,
             poll_desc ? poll_desc : "", (unsigned long)up,
-            (unsigned long)c1_frames, state_str((anim_state_t)c1_state), c1_lit, NUM_LEDS);
+            (unsigned long)c1_frames, state_str((anim_state_t)c1_state), c1_cur);
     } else {
         n += snprintf(out + n, cap - n, "<h2>Healthbar Setup</h2>");
     }

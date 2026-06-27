@@ -100,7 +100,8 @@ static void get_err(void *arg, err_t err) {
 }
 
 bool http_poll_once(const ip_addr_t *ip, uint16_t port, const char *host,
-                    const char *path, int *lit, int *age_s, uint32_t timeout_ms) {
+                    const char *path, int *cur, int *max, int *temp, int *age_s,
+                    uint32_t timeout_ms) {
     get_ctx_t ctx = {0};
     char req[256];
     ctx.req_len = snprintf(req, sizeof(req),
@@ -151,10 +152,14 @@ bool http_poll_once(const ip_addr_t *ip, uint16_t port, const char *host,
     if (!body) return false;
     body += 4;
 
-    int l = 0, a = 0;
-    if (sscanf(body, "%d %d", &l, &a) != 2) return false;
-    if (l < 0 || l > 16) return false;
-    *lit = l;
+    int c = 0, m = 0, t = 0, a = 0;
+    if (sscanf(body, "%d %d %d %d", &c, &m, &t, &a) != 4) return false;
+    if (m < 1) return false;            /* a live character has >= 1 max HP */
+    if (c < 0) c = 0;
+    if (c > m) c = m;
+    *cur = c;
+    *max = m;
+    *temp = t;
     *age_s = a;
     return true;
 }
