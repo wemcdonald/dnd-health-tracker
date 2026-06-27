@@ -4,8 +4,8 @@
 #   just deploy               flash over USB (no BOOTSEL)
 #   just set name shen        set character slug
 #   just set wifi SSID 'pw'   set wifi networks (repeat pairs; priority = order)
-#   just show                 print on-device config (no passwords)
 #
+# View current config at the device's web page (healthbar-<slug>.local).
 # The firmware is generic; identity (name/wifi) is provisioned at runtime, so you
 # build once and provision per device.
 
@@ -34,7 +34,3 @@ deploy:
 # provision config over USB (name/wifi)
 set *args:
     {{provision}} "$@"
-
-# print on-device config
-show:
-    {{provision}} show
