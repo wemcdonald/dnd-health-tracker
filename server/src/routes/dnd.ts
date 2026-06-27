@@ -14,7 +14,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { getLiveState } from "../manager.js";
+import { getLiveState, touchCharacter } from "../manager.js";
 import { getCharacter } from "../db.js";
 
 const NEVER_AGE_SENTINEL = 99999;
@@ -33,6 +33,10 @@ export async function dndRoutes(app: FastifyInstance): Promise<void> {
     if (!getCharacter(slug)) {
       return reply.code(404).type("text/plain; charset=utf-8").send(`unknown character: ${slug}\n`);
     }
+
+    // Record the request: keeps this character polling while devices are on, and
+    // wakes it (with an immediate refetch) if it had gone idle.
+    touchCharacter(slug);
 
     const state = getLiveState(slug);
     reply

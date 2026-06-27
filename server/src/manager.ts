@@ -25,6 +25,12 @@ const RELAXED_INTERVAL_MS = 30_000;
 const ERR_BACKOFF_BASE_MS = 2_000;
 const ERR_BACKOFF_CAP_MS = 60_000;
 
+// Suspend a character entirely (no D&D Beyond polling, no game-log WSS) once its
+// device file hasn't been requested for this long. We only play once a month, so
+// there is no point polling when every device is powered off. The next request
+// for the character wakes it and triggers an immediate refetch.
+const IDLE_MS = Number(process.env["IDLE_TIMEOUT_MS"] ?? 5 * 60_000);
+
 export interface LiveState {
   slug: string;
   lit: number;
@@ -34,6 +40,7 @@ export interface LiveState {
   pct: number;
   online: boolean; // last upstream refresh succeeded
   wsConnected: boolean;
+  suspended: boolean; // idle: no recent requests, so polling + WSS are paused
   lastUpstreamSuccessMs: number; // 0 = never
   lastError: string | null;
 }
@@ -51,6 +58,11 @@ class CharacterManager {
   private pendingNudge = false;
   private wake: (() => void) | null = null;
   private wakeTimer: NodeJS.Timeout | null = null;
+  // Idle suspension: last time a device asked for this character's file, and the
+  // resolver the suspended loop is parked on until the next request wakes it.
+  private lastRequestMs = Date.now();
+  private suspended = false;
+  private resumeWaiter: (() => void) | null = null;
 
   constructor(
     private readonly character: Character,
@@ -65,6 +77,7 @@ class CharacterManager {
       pct: 0,
       online: false,
       wsConnected: false,
+      suspended: false,
       lastUpstreamSuccessMs: 0,
       lastError: null,
     };
@@ -94,6 +107,17 @@ class CharacterManager {
     this.stopped = true;
     this.ws?.stop();
     this.wake?.();
+    this.resumeWaiter?.(); // unpark the loop if it's suspended
+  }
+
+  /**
+   * Record a device request for this character. Keeps polling alive while
+   * devices are on, and wakes the manager from idle suspension on the first
+   * request after a quiet spell (which also triggers an immediate refetch).
+   */
+  touch(): void {
+    this.lastRequestMs = Date.now();
+    if (this.suspended) this.resumeWaiter?.();
   }
 
   /** Request an immediate refetch (from the WSS push). */
@@ -104,6 +128,16 @@ class CharacterManager {
 
   private async runLoop(): Promise<void> {
     while (!this.stopped) {
+      // If no device has asked for this character recently, suspend completely:
+      // drop the WSS and park here (no D&D Beyond polling) until a request wakes
+      // us. On wake we fall straight through to an immediate refresh.
+      if (Date.now() - this.lastRequestMs > IDLE_MS) {
+        this.enterSuspended();
+        await this.waitForResume();
+        if (this.stopped) break;
+        this.exitSuspended();
+      }
+
       await this.refresh();
       if (this.stopped) break;
       if (this.pendingNudge) {
@@ -112,6 +146,32 @@ class CharacterManager {
       }
       await this.waitInterruptible(this.nextIntervalMs());
     }
+  }
+
+  private enterSuspended(): void {
+    if (this.suspended) return;
+    this.suspended = true;
+    this.state.suspended = true;
+    this.ws?.stop(); // stop the game-log websocket while idle
+    this.state.wsConnected = false;
+    console.log(`[${this.state.slug}] idle ${Math.round(IDLE_MS / 1000)}s — suspending poll + WSS`);
+  }
+
+  private exitSuspended(): void {
+    this.suspended = false;
+    this.state.suspended = false;
+    this.ws?.start(); // resubscribe to the game-log websocket
+    console.log(`[${this.state.slug}] request received — resuming poll + WSS`);
+  }
+
+  /** Park until the next touch() (or stop()) wakes the suspended loop. */
+  private waitForResume(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      this.resumeWaiter = () => {
+        this.resumeWaiter = null;
+        resolve();
+      };
+    });
   }
 
   private nextIntervalMs(): number {
@@ -192,6 +252,11 @@ export function syncManagers(): void {
 
 export function getLiveState(slug: string): Readonly<LiveState> | undefined {
   return managers.get(slug)?.getState();
+}
+
+/** Record a device request so the manager stays awake / wakes from idle. */
+export function touchCharacter(slug: string): void {
+  managers.get(slug)?.touch();
 }
 
 export function allLiveStates(): Readonly<LiveState>[] {
