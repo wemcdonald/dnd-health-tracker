@@ -33,6 +33,20 @@ pico_enable_stdio_usb(m0_blink 1)   # USB-CDC printf
 pico_enable_stdio_uart(m0_blink 1)  # UART printf (independent of USB; use picoprobe)
 pico_add_extra_outputs(m0_blink)    # produces .uf2 and .elf
 
+# ─── M5 bring-up: standalone WS2812 test (no cyw43, no wifi, no core1) ─────────
+add_executable(m5_ledtest
+    src/m5_ledtest.c
+)
+pico_generate_pio_header(m5_ledtest ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
+target_include_directories(m5_ledtest PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+target_link_libraries(m5_ledtest
+    pico_stdlib
+    hardware_pio
+)
+pico_enable_stdio_usb(m5_ledtest 1)
+pico_enable_stdio_uart(m5_ledtest 1)
+pico_add_extra_outputs(m5_ledtest)
+
 # ─── M1: captive portal ──────────────────────────────────────────────────────
 add_executable(m1_portal
     src/portal.c

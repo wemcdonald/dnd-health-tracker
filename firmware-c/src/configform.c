@@ -4,6 +4,7 @@
 #include "configform.h"
 #include "config.h"
 #include "health.h"
+#include "leds.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -104,6 +105,8 @@ int configform_page(char *out, int cap, bool with_status, const char *slug, cons
 
     if (with_status) {
         health_t h = health_snapshot();
+        uint32_t c1_frames; int c1_state, c1_lit;
+        leds_diag(&c1_frames, &c1_state, &c1_lit);
         uint32_t up = to_ms_since_boot(get_absolute_time()) / 1000;
         const char *ip = ip4addr_ntoa(netif_ip4_addr(&cyw43_state.netif[CYW43_ITF_STA]));
         char slug_esc[64];
@@ -115,9 +118,11 @@ int configform_page(char *out, int cap, bool with_status, const char *slug, cons
             "<tr><td>upstream age</td><td>%d s</td></tr>"
             "<tr><td>IP</td><td>%s</td></tr>"
             "<tr><td>polling</td><td><small>%s</small></td></tr>"
-            "<tr><td>uptime</td><td>%lu s</td></tr></table>",
+            "<tr><td>uptime</td><td>%lu s</td></tr>"
+            "<tr><td>core1</td><td>frames=%lu, last %s %d/%d</td></tr></table>",
             slug_esc, state_str(h.state), h.lit, NUM_LEDS, h.age_s, ip,
-            poll_desc ? poll_desc : "", (unsigned long)up);
+            poll_desc ? poll_desc : "", (unsigned long)up,
+            (unsigned long)c1_frames, state_str((anim_state_t)c1_state), c1_lit, NUM_LEDS);
     } else {
         n += snprintf(out + n, cap - n, "<h2>Healthbar Setup</h2>");
     }

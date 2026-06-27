@@ -321,6 +321,12 @@ static void run_poll_loop(const char *slug) {
                 printf("poll: FAILED (offline)\n");
                 health_set_state(ST_OFFLINE);
             }
+        } else {
+            /* DNS not resolving: we're connected to wifi but can't reach the
+             * server. Show OFFLINE (breathing) rather than sitting forever on
+             * the pre-connect CONNECTING animation. */
+            printf("poll: resolve FAILED (offline)\n");
+            health_set_state(ST_OFFLINE);
         }
         idle_ms(2000);  /* responsive: feeds watchdog + handles provisioning */
     }

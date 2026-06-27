@@ -28,7 +28,7 @@
 
 #include "ws2812.pio.h"
 
-#define LED_GPIO        18
+#define LED_GPIO        2
 #define FRAME_MS        33          // ~30 fps
 #define BRIGHTNESS      0.5f        // global scale
 #define LOW_LIT_THRESHOLD 4         // <= this -> heartbeat (fill below ~0.25)
@@ -47,6 +47,19 @@ static const rgb_t GREEN   = { 0.0f, 1.0f, 0.0f };
 
 static health_t   g_health;
 static spin_lock_t *g_lock;
+
+/* DIAG (M5 bring-up): core1 publishes its own liveness here. Plain volatiles,
+ * single 32-bit aligned writes from core1 / reads from core0 — atomic on M33,
+ * no lock needed for a liveness probe. */
+static volatile uint32_t g_frames     = 0;
+static volatile int      g_last_state = -1;
+static volatile int      g_last_lit   = -1;
+
+void leds_diag(uint32_t *frames, int *last_state, int *last_lit) {
+    if (frames)     *frames     = g_frames;
+    if (last_state) *last_state = g_last_state;
+    if (last_lit)   *last_lit   = g_last_lit;
+}
 
 void health_init(void) {
     g_lock = spin_lock_init(spin_lock_claim_unused(true));
@@ -200,12 +213,26 @@ static void core1_main(void) {
         uint32_t now_ms = to_ms_since_boot(get_absolute_time());
         health_t h = health_snapshot();
         render(&h, now_ms, &prev_lit, &flash_start_ms, &flash_is_damage);
-        sleep_ms(FRAME_MS);
+        g_last_state = (int)h.state;
+        g_last_lit   = h.lit;
+        g_frames++;
+        /* NOT sleep_ms: on core1, sleep_ms parks on __wfe() waiting for the
+         * default alarm pool's IRQ, which is serviced on core0. Once cyw43's
+         * lwip_threadsafe_background context is active (after wifi link-up) that
+         * wakeup never arrives and core1 hangs here forever. core1 is dedicated
+         * to the LED loop, so busy-wait on the raw timer — no alarms, no WFE,
+         * no interaction with cyw43. */
+        busy_wait_ms(FRAME_MS);
     }
 }
 
 void leds_launch(void) {
-    s_pio = pio0;
+    /* Dedicated PIO block: cyw43_arch_init() (called before us) claims a state
+     * machine on pio0 for the radio's SPI bus. On RP2350 that block also carries
+     * a per-block GPIO base tied to the wireless pins, so sharing pio0 with the
+     * WS2812 output let the radio stall our SM at wifi link-up — core1 then hung
+     * forever in pio_sm_put_blocking. pio1 is untouched by cyw43. */
+    s_pio = pio1;
     s_sm = (uint)pio_claim_unused_sm(s_pio, true);
     multicore_launch_core1(core1_main);
 }
