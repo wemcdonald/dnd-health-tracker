@@ -8,9 +8,12 @@
  *   node provision.mjs show
  *   node provision.mjs reboot
  *
- * Values are percent-encoded so spaces/specials survive the space-delimited
- * line; the firmware URL-decodes each token. The device replies "OK ..."/"ERR
- * ..." then (for name/wifi) reboots to apply.
+ * Values are percent-encoded so spaces/specials survive the space-delimited line;
+ * the firmware URL-decodes each token. name/wifi save to flash and reboot.
+ *
+ * USB-CDC on some hosts is flaky, so we: settle briefly after opening, send a
+ * leading newline to clear any partial line on the device, and treat the device
+ * rebooting (port drop) right after a save command as success.
  */
 import fs from "node:fs";
 
@@ -20,7 +23,6 @@ if (args.length < 1) {
   process.exit(2);
 }
 
-// Find the device serial port.
 const devs = fs.readdirSync("/dev").filter((f) => f.startsWith("cu.usbmodem"));
 if (devs.length === 0) {
   console.error("error: no /dev/cu.usbmodem* found — is the board plugged in via USB?");
@@ -28,33 +30,50 @@ if (devs.length === 0) {
 }
 const dev = "/dev/" + devs[0];
 
-// Build the line: command + percent-encoded params.
 const [cmd, ...params] = args;
 const line = [cmd, ...params.map((s) => encodeURIComponent(s))].join(" ") + "\n";
+const reboots = cmd === "name" || cmd === "wifi" || cmd === "reboot";
 
 const fd = fs.openSync(dev, "r+");
-fs.writeSync(fd, line);
-
 let buf = "";
-const rs = fs.createReadStream(null, { fd, autoClose: false });
+let wrote = false;
 let done = false;
-const finish = (code) => {
+
+const rs = fs.createReadStream(null, { fd, autoClose: false });
+
+const finish = (msg, code) => {
   if (done) return;
   done = true;
-  const reply = buf.trim();
-  console.log(reply || "(no response — command sent)");
+  console.log(msg);
   try { rs.destroy(); } catch {}
   try { fs.closeSync(fd); } catch {}
-  // OK/“rebooting” still counts as success.
-  process.exit(code ?? (/\bERR\b/.test(reply) ? 1 : 0));
+  process.exit(code);
 };
 
 rs.on("data", (d) => {
   buf += d;
-  // The device reboots right after "OK ..."; grab the reply and stop.
-  if (/\bOK\b|\bERR\b|no config|^slug=/m.test(buf)) setTimeout(() => finish(), 200);
+  if (/\bOK\b/.test(buf))   setTimeout(() => finish(buf.trim(), 0), 150);
+  else if (/\bERR\b/.test(buf)) setTimeout(() => finish(buf.trim(), 1), 150);
+  else if (/no config|^slug=/m.test(buf)) setTimeout(() => finish(buf.trim(), 0), 150);
 });
-rs.on("error", () => finish());        // port dropped (device rebooted) after we got the reply
-// 'show' doesn't reboot; cap the wait. Connected devices can take a few seconds
-// to drain input (poll cycle), so allow a generous window.
-setTimeout(() => finish(), 9000);
+rs.on("error", () => {
+  // Port dropped. After a save command that's the expected reboot = success.
+  if (wrote && reboots) finish(buf.trim() || "sent — device rebooting to apply", 0);
+});
+
+// Settle the CDC, flush any partial line, then send the command.
+setTimeout(() => {
+  try {
+    fs.writeSync(fd, "\n");
+    fs.writeSync(fd, line);
+    wrote = true;
+  } catch (e) {
+    finish("write failed: " + e.message, 1);
+  }
+}, 300);
+
+// Cap the wait. A connected device can take a couple seconds to drain input.
+setTimeout(() => {
+  if (reboots) finish(buf.trim() || "no confirmation — re-run, or check the device web page", 0);
+  else finish(buf.trim() || "(no response)", 0);
+}, 9000);
