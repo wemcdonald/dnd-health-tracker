@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFirmwareManifest, firmwareManifestText } from "../src/firmware.js";
+import Fastify from "fastify";
+import { firmwareRoutes } from "../src/routes/firmware.js";
 
 function dirWith(manifest: string | null): string {
   const d = mkdtempSync(join(tmpdir(), "fw-"));
@@ -68,5 +70,53 @@ describe("firmwareManifestText", () => {
   it("round-trips the wire format", () => {
     const m = { version: 42, size: 418234, sha256: "b".repeat(64), imagePath: "/firmware/image.bin" };
     expect(firmwareManifestText(m)).toBe("42 418234\n" + "b".repeat(64) + "\n/firmware/image.bin\n");
+  });
+});
+
+function appWithImage(): { app: ReturnType<typeof Fastify>; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), "fwsrv-"));
+  const body = Buffer.from("HELLO-FIRMWARE-IMAGE-BYTES");
+  writeFileSync(join(dir, "image.bin"), body);
+  writeFileSync(
+    join(dir, "manifest.txt"),
+    `7 ${body.length}\n` + "c".repeat(64) + "\n/firmware/image.bin\n",
+  );
+  const app = Fastify();
+  app.register(firmwareRoutes, { firmwareDir: dir });
+  return { app, dir };
+}
+
+describe("GET /firmware/latest", () => {
+  it("serves the manifest as text", async () => {
+    const { app } = appWithImage();
+    const res = await app.inject({ method: "GET", url: "/firmware/latest" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/plain/);
+    expect(res.body).toBe("7 26\n" + "c".repeat(64) + "\n/firmware/image.bin\n");
+  });
+  it("404s when nothing is published", async () => {
+    const app = Fastify();
+    app.register(firmwareRoutes, { firmwareDir: mkdtempSync(join(tmpdir(), "empty-")) });
+    const res = await app.inject({ method: "GET", url: "/firmware/latest" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("GET /firmware/image.bin", () => {
+  it("serves the whole image", async () => {
+    const { app } = appWithImage();
+    const res = await app.inject({ method: "GET", url: "/firmware/image.bin" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["accept-ranges"]).toBe("bytes");
+    expect(res.body).toBe("HELLO-FIRMWARE-IMAGE-BYTES");
+  });
+  it("serves a byte range as 206", async () => {
+    const { app } = appWithImage();
+    const res = await app.inject({
+      method: "GET", url: "/firmware/image.bin", headers: { range: "bytes=0-4" },
+    });
+    expect(res.statusCode).toBe(206);
+    expect(res.headers["content-range"]).toBe("bytes 0-4/26");
+    expect(res.body).toBe("HELLO");
   });
 });
