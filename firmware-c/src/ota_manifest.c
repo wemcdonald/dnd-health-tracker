@@ -21,9 +21,12 @@ bool ota_manifest_parse(const char *body, size_t len, ota_manifest_t *out) {
     char *l3 = strchr(l2, '\n'); if (!l3) return false; *l3++ = '\0';
     char *l3end = strpbrk(l3, "\r\n"); if (l3end) *l3end = '\0';
 
+    // Reject signed numeric line so "-1" doesn't silently wrap to UINT_MAX.
+    if (strpbrk(l1, "-+") != NULL) return false;
+
     unsigned ver = 0, sz = 0;
     if (sscanf(l1, "%u %u", &ver, &sz) != 2) return false;
-    if (sz == 0) return false;
+    if (sz == 0 || sz > OTA_MAX_IMAGE_BYTES) return false;
     if (!is_hex64(l2)) return false;
     if (l3[0] != '/') return false;
     if (strlen(l3) >= sizeof(out->path)) return false;
