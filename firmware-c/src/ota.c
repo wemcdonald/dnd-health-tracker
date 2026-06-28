@@ -137,18 +137,19 @@ ota_result_t ota_check_and_update(const ip_addr_t *srv, uint16_t port, const cha
 
     /* 7. Verified. Arm a TBYB trial boot of the freshly-written slot.
      *
-     * OPEN QUESTION (MUST be confirmed on hardware): rom_reboot's param0
-     * (update_base) — is it the flash STORAGE offset (e.g. 0x200000) or the
-     * XIP-mapped address (0x10200000)? We pass the storage offset (`slot`) per the
-     * spike's current assumption. If the trial boot does not pick the new slot on
-     * hardware, try (XIP_BASE | slot). See ota/SPIKE_NOTES.md.
+     * RESOLVED on hardware (Task 1 spike, ota/SPIKE_NOTES.md): rom_reboot's param0
+     * (update_base) must be the XIP-mapped address (XIP_BASE + slot, e.g. 0x10200000),
+     * NOT the flash storage offset. With the storage offset the bootrom kept booting
+     * the committed slot and never trialed the new one; with the XIP address the trial
+     * fired and rom_explicit_buy committed it (active slot flipped). The spike proved
+     * both the trial and the commit using exactly this call.
      *
      * The 100 ms delay lets this printf flush; rom_reboot returns (no
      * NO_RETURN_ON_SUCCESS flag), so the caller is expected to spin feeding the
      * watchdog until the reboot fires. */
-    printf("OTA: verified v%lu — arming TBYB reboot of slot 0x%lx\n",
-           (unsigned long)m.version, (unsigned long)slot);
-    rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE, 100, slot, 0);
+    printf("OTA: verified v%lu — arming TBYB reboot of slot 0x%lx (XIP 0x%lx)\n",
+           (unsigned long)m.version, (unsigned long)slot, (unsigned long)(XIP_BASE + slot));
+    rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE, 100, XIP_BASE + slot, 0);
     return OTA_ARMED;
 }
 
