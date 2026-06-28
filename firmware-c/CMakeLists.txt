@@ -51,6 +51,7 @@ pico_add_extra_outputs(m5_ledtest)
 add_executable(m1_portal
     src/portal.c
     src/config.c
+    src/config_choose.c
     src/http_poll.c
     src/leds.c
     src/statusd.c
@@ -114,3 +115,20 @@ endif()
 pico_enable_stdio_usb(m1_portal 1)
 pico_enable_stdio_uart(m1_portal 1)
 pico_add_extra_outputs(m1_portal)
+
+# ─── SPIKE (Task 1, THROWAWAY): RP2350 A/B + TBYB proof ───────────────────────
+# Build with -DFIRMWARE_VERSION=1 then =2. Removed at end of Task 1.
+if(NOT DEFINED FIRMWARE_VERSION)
+    set(FIRMWARE_VERSION 1)
+endif()
+if(NOT DEFINED SPIKE_BUY)
+    set(SPIKE_BUY 0)
+endif()
+add_executable(m6_tbyb src/m6_tbyb.c)
+target_compile_definitions(m6_tbyb PRIVATE FIRMWARE_VERSION=${FIRMWARE_VERSION} SPIKE_BUY=${SPIKE_BUY})
+target_link_libraries(m6_tbyb pico_stdlib pico_bootrom hardware_watchdog)
+# Embed the version into the image-def so the bootrom A/B picker agrees with us.
+pico_set_program_version(m6_tbyb "${FIRMWARE_VERSION}.0")
+pico_enable_stdio_usb(m6_tbyb 1)
+pico_enable_stdio_uart(m6_tbyb 1)
+pico_add_extra_outputs(m6_tbyb)

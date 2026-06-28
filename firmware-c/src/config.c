@@ -15,12 +15,15 @@
  * Flash erase/program must stop core1 (which executes from XIP) while it runs. */
 static volatile bool s_core1_running = false;
 void config_set_core1_running(bool running) { s_core1_running = running; }
+bool config_core1_running(void) { return s_core1_running; }
 
 #define CONFIG_MAGIC   0xD2D17EA1u
 #define CONFIG_VERSION 1
 
-/* Last sector of flash, away from the program image. */
-#define FLASH_TARGET_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
+/* Legacy: pre-OTA config lived in the very last flash sector.
+ * PICO_FLASH_SIZE_BYTES and FLASH_SECTOR_SIZE come from the Pico SDK hardware
+ * headers included above, so the macro is safe here. */
+#define CONFIG_LEGACY_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 
 /* Bytes to program: sizeof(persist_t) rounded up to a flash page (256). */
 #define CONFIG_PROG_SIZE \
@@ -38,17 +41,33 @@ static uint32_t crc32_calc(const uint8_t *data, size_t len) {
     return ~crc;
 }
 
-bool config_load(persist_t *out) {
-    const persist_t *flash = (const persist_t *)(XIP_BASE + FLASH_TARGET_OFFSET);
-    if (flash->magic != CONFIG_MAGIC) return false;
-    if (flash->version != CONFIG_VERSION) return false;
+/* Validate and copy a persist_t from a flash offset into *out.
+ * Returns true only if magic, version, net_count, and CRC32 all pass. */
+static bool read_at(uint32_t offset, persist_t *out) {
+    const persist_t *f = (const persist_t *)(XIP_BASE + offset);
+    if (f->magic != CONFIG_MAGIC) return false;
+    if (f->version != CONFIG_VERSION) return false;
     /* 0 nets is valid (e.g. `set name` before `set wifi`) — caller decides what
      * to do with no networks (we raise the portal). */
-    if (flash->net_count > MAX_NETS) return false;
-    uint32_t want = crc32_calc((const uint8_t *)flash, offsetof(persist_t, crc32));
-    if (want != flash->crc32) return false;
-    memcpy(out, flash, sizeof(*out));
+    if (f->net_count > MAX_NETS) return false;
+    uint32_t want = crc32_calc((const uint8_t *)f, offsetof(persist_t, crc32));
+    if (want != f->crc32) return false;
+    memcpy(out, f, sizeof(*out));
     return true;
+}
+
+bool config_load(persist_t *out) {
+    /* Normal path: config partition holds a valid image. */
+    if (read_at(CONFIG_FLASH_OFFSET, out)) return true;
+
+    /* First partitioned boot: migrate legacy last-sector copy forward. */
+    if (read_at(CONFIG_LEGACY_OFFSET, out)) {
+        config_save(out);   /* writes to CONFIG_FLASH_OFFSET; legacy untouched */
+        return true;
+    }
+
+    /* Neither location valid — provisioning needed. */
+    return false;
 }
 
 bool config_save(persist_t *cfg) {
@@ -68,8 +87,8 @@ bool config_save(persist_t *cfg) {
      * core0 runs, so disabling core0 IRQs makes the flash op safe. */
     if (s_core1_running) multicore_reset_core1();
     uint32_t ints = save_and_disable_interrupts();
-    flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
-    flash_range_program(FLASH_TARGET_OFFSET, buf, CONFIG_PROG_SIZE);
+    flash_range_erase(CONFIG_FLASH_OFFSET, FLASH_SECTOR_SIZE);
+    flash_range_program(CONFIG_FLASH_OFFSET, buf, CONFIG_PROG_SIZE);
     restore_interrupts(ints);
 
     persist_t check;
