@@ -10,10 +10,15 @@ services:
     environment:
       - PORT=8080
       - DB_PATH=/data/tracker.db
+      # OTA firmware images are served from here. Bind-mounted (below) from the
+      # host's ./firmware dir so an scp/publish into that dir goes live without a
+      # rebuild. The dir is gitignored, so `git pull` never clobbers it.
+      - FIRMWARE_DIR=/firmware
       # Optional light guard for the admin UI (cobalt cookie is sensitive):
       # - ADMIN_PASSWORD=change-me
     volumes:
       - tracker-data:/data
+      - ./firmware:/firmware
 
 volumes:
   tracker-data:
