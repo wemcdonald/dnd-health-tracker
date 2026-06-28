@@ -20,6 +20,14 @@ if (existsSync(manifestPath)) {
 }
 
 const bytes = readFileSync(imagePath);
+// Must match firmware OTA_MAX_IMAGE_BYTES (A/B slot capacity = 1992 KiB).
+// Refuse oversized images at publish time so the failure is loud here rather
+// than a silent no-update on the device (the firmware parser rejects them).
+const OTA_MAX_IMAGE_BYTES = 1992 * 1024;
+if (bytes.length > OTA_MAX_IMAGE_BYTES) {
+  console.error(`image is ${bytes.length} bytes, exceeds OTA_MAX_IMAGE_BYTES (${OTA_MAX_IMAGE_BYTES}); refusing to publish`);
+  process.exit(1);
+}
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 copyFileSync(imagePath, join(outDir, "image.bin"));
 writeFileSync(manifestPath, `${nextVersion} ${bytes.length}\n${sha256}\n/firmware/image.bin\n`);
