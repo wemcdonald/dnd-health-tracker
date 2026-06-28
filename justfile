@@ -49,7 +49,7 @@ publish-fw version="1":
         -DHEALTHBAR_NAME= -DDEV_SEED_CONFIG=OFF -DFIRMWARE_VERSION="$FW_VERSION" -DOTA_TBYB=ON)
     (cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake --build build -j4 --target m1_portal)
     FIRMWARE_DIR="{{justfile_directory()}}/server/firmware" \
-        node "{{justfile_directory()}}/server/tools/publish-fw.mjs" "{{build_dir}}/m1_portal.bin"
+        node "{{justfile_directory()}}/server/tools/publish-fw.mjs" "{{build_dir}}/m1_portal.bin" "$FW_VERSION"
 
 # run host-compiled C unit tests (no hardware)
 test-host:

@@ -3,20 +3,29 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-const [, , imagePath] = process.argv;
+const [, , imagePath, versionArg] = process.argv;
 if (!imagePath) {
-  console.error("usage: publish-fw.mjs <path-to-image.bin>");
+  console.error("usage: publish-fw.mjs <path-to-image.bin> [version]");
   process.exit(1);
 }
 const outDir = process.env.FIRMWARE_DIR ?? join(process.cwd(), "firmware");
 mkdirSync(outDir, { recursive: true });
 
 const manifestPath = join(outDir, "manifest.txt");
-let nextVersion = 1;
-if (existsSync(manifestPath)) {
-  const first = readFileSync(manifestPath, "utf8").split("\n")[0];
-  const cur = Number(first.trim().split(/\s+/)[0]);
-  if (Number.isInteger(cur)) nextVersion = cur + 1;
+// The published manifest version MUST match the version baked into the image
+// (the device gates updates on manifest.version > its baked FIRMWARE_VERSION).
+// `just publish-fw version=N` passes N here so the two stay consistent; if no
+// explicit version is given, fall back to auto-incrementing the prior manifest.
+let nextVersion;
+if (versionArg !== undefined && Number.isInteger(Number(versionArg))) {
+  nextVersion = Number(versionArg);
+} else {
+  nextVersion = 1;
+  if (existsSync(manifestPath)) {
+    const first = readFileSync(manifestPath, "utf8").split("\n")[0];
+    const cur = Number(first.trim().split(/\s+/)[0]);
+    if (Number.isInteger(cur)) nextVersion = cur + 1;
+  }
 }
 
 const bytes = readFileSync(imagePath);
