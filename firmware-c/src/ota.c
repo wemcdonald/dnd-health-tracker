@@ -113,10 +113,10 @@ ota_result_t ota_check_and_update(const ip_addr_t *srv, uint16_t port, const cha
      *    This proves what is ACTUALLY on the slot (not just what we streamed) is
      *    intact before we let the bootrom trial-boot it.
      *
-     * HAZARD (stack usage): `rb` is a 4 KB sector-sized buffer on this (the portal
-     * task) stack. If that stack is tight, make `rb` static too — it is only used
-     * here and is not re-entrant-sensitive (single OTA at a time). */
-    uint8_t rb[OTA_SECTOR];
+     * `rb` is a 4 KB sector-sized re-hash buffer kept static (off the portal task
+     * stack) so the OTA path adds no stack pressure — safe because the OTA check is
+     * single-shot / non-reentrant (one OTA at a time), like `slot` and `dl`. */
+    static uint8_t rb[OTA_SECTOR];
     sha256_ctx vh;
     sha256_init(&vh);
     for (uint32_t off = 0; off < m.size; off += OTA_SECTOR) {
@@ -179,8 +179,9 @@ void ota_commit_if_trial(void) {
  *    watchdog in its poll loop, but the watchdog is NOT fed during a flash sector
  *    program (IRQs off, no poll). A single sector program is well under any sane
  *    watchdog period, but the cumulative behaviour under a flaky link is unproven.
- * 5. Stack usage: the 4 KB re-hash buffer `rb` lives on the caller's stack; if the
- *    portal task stack is tight this could overflow (make it static if so).
+ * 5. (resolved) The 4 KB re-hash buffer `rb` is now static, so it adds no portal
+ *    task stack pressure. The static download/sink state (`slot`, `dl`, `rb`, the
+ *    streaming ctx) relies on OTA being single-shot / non-reentrant.
  * 6. core1 must stay stopped between ota_flash_prepare and the reboot (caller's
  *    job — Task 10).
  */
