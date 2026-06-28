@@ -59,6 +59,10 @@ add_executable(m1_portal
     src/provision.c
     src/dhcpserver.c
     src/dnsserver.c
+    src/sha256.c
+    src/ota_manifest.c
+    src/ota_sink.c
+    src/ota_flash.c
 )
 
 pico_generate_pio_header(m1_portal ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
@@ -78,6 +82,7 @@ target_link_libraries(m1_portal
     pico_stdlib
     pico_multicore
     pico_lwip_mdns
+    pico_bootrom
     hardware_flash
     hardware_sync
     hardware_pio
