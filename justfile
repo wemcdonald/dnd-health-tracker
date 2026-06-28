@@ -34,3 +34,8 @@ deploy:
 # provision config over USB (name/wifi)
 set *args:
     {{provision}} "$@"
+
+# publish the current built image as the new "latest" firmware (server reads server/firmware)
+publish-fw:
+    FIRMWARE_DIR="{{justfile_directory()}}/server/firmware" \
+        node "{{justfile_directory()}}/server/tools/publish-fw.mjs" "{{build_dir}}/m1_portal.bin"
