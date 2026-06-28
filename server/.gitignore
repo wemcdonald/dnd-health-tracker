@@ -2,4 +2,9 @@ node_modules/
 dist/
 data/
 *.log
-firmware/
+# Published OTA images are tracked so git history is the firmware changelog and
+# the deploy transport (server agent pulls, copies into its FIRMWARE_DIR). Only
+# the two published artifacts are tracked; any other scratch in firmware/ is not.
+firmware/*
+!firmware/image.bin
+!firmware/manifest.txt
