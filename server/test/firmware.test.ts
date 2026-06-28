@@ -24,6 +24,44 @@ describe("readFirmwareManifest", () => {
     const d = dirWith("42 418234\nabc\n/firmware/image.bin\n");
     expect(readFirmwareManifest(d)).toBeNull();
   });
+  it("accepts version 0", () => {
+    const d = dirWith("0 418234\n" + "a".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toEqual({
+      version: 0, size: 418234, sha256: "a".repeat(64), imagePath: "/firmware/image.bin",
+    });
+  });
+  it("returns null on size 0", () => {
+    const d = dirWith("42 0\n" + "a".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
+  it("returns null on a negative size", () => {
+    const d = dirWith("42 -1\n" + "a".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
+  it("returns null on a negative version", () => {
+    const d = dirWith("-1 418234\n" + "a".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
+  it("returns null on a non-integer version", () => {
+    const d = dirWith("1.5 418234\n" + "a".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
+  it("returns null on a non-integer size", () => {
+    const d = dirWith("42 4182.34\n" + "a".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
+  it("returns null when imagePath lacks a leading slash", () => {
+    const d = dirWith("42 418234\n" + "a".repeat(64) + "\nfirmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
+  it("returns null on a sha256 with invalid hex chars (correct length)", () => {
+    const d = dirWith("42 418234\n" + "g".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
+  it("returns null when line 0 has only one token", () => {
+    const d = dirWith("42\n" + "a".repeat(64) + "\n/firmware/image.bin\n");
+    expect(readFirmwareManifest(d)).toBeNull();
+  });
 });
 
 describe("firmwareManifestText", () => {

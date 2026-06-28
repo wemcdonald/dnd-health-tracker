@@ -20,6 +20,7 @@ export function readFirmwareManifest(dir: string): FirmwareManifest | null {
   const lines = raw.split("\n");
   if (lines.length < 3) return null;
   const parts = lines[0]!.trim().split(/\s+/);
+  if (parts.length < 2) return null;
   const version = Number(parts[0]);
   const size = Number(parts[1]);
   const sha256 = lines[1]!.trim();
