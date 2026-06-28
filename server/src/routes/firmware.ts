@@ -29,6 +29,9 @@ export async function firmwareRoutes(app: FastifyInstance, opts: Opts) {
 
     const range = req.headers.range;
     if (range) {
+      // Handles bytes=START-END and bytes=START- forms; suffix ranges (bytes=-N)
+      // and multi-range sets are not implemented — an unrecognised Range is ignored
+      // and the full file is returned (RFC 9110-compliant).
       const m = /^bytes=(\d+)-(\d*)$/.exec(range);
       if (m) {
         const start = Number(m[1]);

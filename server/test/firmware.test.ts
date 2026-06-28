@@ -119,4 +119,18 @@ describe("GET /firmware/image.bin", () => {
     expect(res.headers["content-range"]).toBe("bytes 0-4/26");
     expect(res.body).toBe("HELLO");
   });
+  it("returns 416 for an out-of-range request", async () => {
+    const { app } = appWithImage();
+    const res = await app.inject({
+      method: "GET", url: "/firmware/image.bin", headers: { range: "bytes=9999-9999" },
+    });
+    expect(res.statusCode).toBe(416);
+    expect(res.headers["content-range"]).toBe("bytes */26");
+  });
+  it("404s when no image is published", async () => {
+    const app = Fastify();
+    app.register(firmwareRoutes, { firmwareDir: mkdtempSync(join(tmpdir(), "empty-img-")) });
+    const res = await app.inject({ method: "GET", url: "/firmware/image.bin" });
+    expect(res.statusCode).toBe(404);
+  });
 });
