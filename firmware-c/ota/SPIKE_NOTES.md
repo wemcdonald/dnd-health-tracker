@@ -1,10 +1,47 @@
 # Task 1 Spike Notes — RP2350 A/B + TBYB
 
-Status: **PARTIALLY COMPLETE.** Tool versions, partition-table schema, and on-device
-partition layout are PROVEN. The empirical TBYB round-trip (trial boot / auto-revert /
-explicit-buy commit) is **BLOCKED on USB observability** — see "Blocker" below. The
-findings already pinned are enough to implement Tasks 8–11; the TBYB proof is queued
-as a human-assisted validation.
+Status: **MOSTLY COMPLETE (hardware, 2026-06-28).** Tool/schema/layout PROVEN. TBYB
+**trial boot + explicit-buy commit PROVEN on real hardware.** Auto-revert: high
+confidence, final on-device confirm pending (device-access friction). One **real bug
+found + fixed** in firmware (see "RESULT 1").
+
+## HARDWARE RESULTS (2026-06-28)
+
+Observation method (USB-CDC is unreliable on this Mac, so NO serial): the spike app
+(`src/m6_tbyb.c`) writes a 4-byte marker `{0xAA, version, ~version, 0x55}` to the config
+partition (0x3FE000) on every boot, and returns itself to BOOTSEL via
+`rom_reboot(BOOTSEL)`. Read back in BOOTSEL with
+`picotool save -r 0x103FE000 0x103FE004 f.bin` → marker[1] tells which SLOT executed
+(1=A, 2=B). A/B active slot read with `picotool partition info -m rp2350-arm-s`
+("can be downloaded in partition N" ⇒ the OTHER partition is active/committed).
+
+- **RESULT 1 — update_base MUST be the XIP address (CRITICAL, bug fixed).**
+  `rom_reboot(REBOOT2_FLAG_REBOOT_TYPE_FLASH_UPDATE, 100, update_base, 0)` only trials
+  the target slot when `update_base = XIP_BASE + slot_offset` (e.g. 0x10200000 for B).
+  With the **storage offset** (0x200000) the bootrom kept booting the committed slot A
+  (marker stayed 1) — no trial. With the **XIP address** the trial fired (marker→2).
+  `ota.c` had passed the storage offset → **fixed in commit 0891a50** (`XIP_BASE + slot`).
+- **RESULT 2 — explicit_buy commits (PROVEN).** After the XIP trial of B(v2) called
+  `rom_explicit_buy`, the active slot flipped A→B (`partition info -m` target moved from
+  partition 1 to partition 0) and stayed. Commit works.
+- **RESULT 3 — flash_range_* works with a resident partition table (PROVEN).** The app
+  wrote the marker to 0x3FE000 via `flash_range_erase`/`flash_range_program` and it read
+  back correctly. So Task 8's `flash_range_*` choice is correct — `rom_flash_op` is NOT
+  needed. (No core1 in the spike; the firmware additionally resets core1 first.)
+- **RESULT 4 — `picotool reboot -g <part>` does NOT force a slot boot** (it sets the
+  diagnostic partition). Forcing a specific slot is done via the FLASH_UPDATE trial only.
+- **Auto-revert — PENDING final confirm.** Mechanism + commit proven; revert is the
+  bootrom-guaranteed complement (un-bought trial → next reset returns to the committed
+  slot). Test set up (A=arm-B, B=v2-nobuy) but the device went unreachable mid-run;
+  re-confirm via: clean BOOTSEL power-cycle → boot A → no-buy trial of B → plain
+  `picotool reboot` → marker should return to 1 (A) / active stays A.
+- **Single-image-vs-per-slot:** the SAME built image runs from whichever slot the
+  bootrom selects (v1 ran from A, v2 from B, same source) → single-image-via-address-
+  translation confirmed; no per-slot relink needed.
+
+---
+
+### (Superseded) original blocker note
 
 ## Step 1 — Pinned tool versions (verified 2026-06-27)
 - `picotool` **2.2.0** (Homebrew, `/opt/homebrew/Cellar/picotool/2.2.0`).
