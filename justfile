@@ -27,7 +27,7 @@ build version="1":
     arg="${1:-1}"; FW_VERSION="${arg#version=}"
     (cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake -B build -DPICO_BOARD=pico2_w \
         -DPOLL_HOST=dndhealth.willflix.org -DPOLL_PORT=80 -DENABLE_STATUSD=ON \
-        -DHEALTHBAR_NAME= -DDEV_SEED_CONFIG=OFF -DFIRMWARE_VERSION="$FW_VERSION")
+        -DHEALTHBAR_NAME= -DDEV_SEED_CONFIG=OFF -DFIRMWARE_VERSION="$FW_VERSION" -DOTA_TBYB=OFF)
     (cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake --build build -j4 --target m1_portal)
 
 # flash over USB (no BOOTSEL)
@@ -38,8 +38,16 @@ deploy:
 set *args:
     {{provision}} "$@"
 
-# publish the current built image as the new "latest" firmware (server reads server/firmware)
-publish-fw:
+# build a TBYB-flagged OTA image and publish it as the new "latest" (server reads server/firmware).
+# OTA_TBYB=ON makes a bad update auto-revert on the device (spike-proven requirement).
+publish-fw version="1":
+    #!/usr/bin/env sh
+    set -e
+    arg="${1:-1}"; FW_VERSION="${arg#version=}"
+    (cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake -B build -DPICO_BOARD=pico2_w \
+        -DPOLL_HOST=dndhealth.willflix.org -DPOLL_PORT=80 -DENABLE_STATUSD=ON \
+        -DHEALTHBAR_NAME= -DDEV_SEED_CONFIG=OFF -DFIRMWARE_VERSION="$FW_VERSION" -DOTA_TBYB=ON)
+    (cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake --build build -j4 --target m1_portal)
     FIRMWARE_DIR="{{justfile_directory()}}/server/firmware" \
         node "{{justfile_directory()}}/server/tools/publish-fw.mjs" "{{build_dir}}/m1_portal.bin"
 

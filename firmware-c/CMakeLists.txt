@@ -108,6 +108,17 @@ target_compile_definitions(m1_portal PRIVATE FIRMWARE_VERSION=${FIRMWARE_VERSION
 # Embed the same version into the image-def so the bootrom A/B picker agrees with us.
 pico_set_program_version(m1_portal "${FIRMWARE_VERSION}.0")
 
+# OTA rollback: images delivered VIA OTA must be flagged "explicit buy" (TBYB) so a
+# flash-update boot is a revertible trial — a bad update auto-reverts unless the new
+# image calls rom_explicit_buy (ota_commit_if_trial, after the first good poll). Proven
+# required on hardware (ota/SPIKE_NOTES.md RESULT 5). `just publish-fw` builds with
+# OTA_TBYB=ON; `just build`/`just migrate-ota` leave it OFF so the INITIAL install is
+# permanent immediately (no revert-to-empty-slot risk before the first commit).
+option(OTA_TBYB "Flag image-def explicit-buy (TBYB) — for OTA-published images only" OFF)
+if(OTA_TBYB)
+    target_compile_definitions(m1_portal PRIVATE PICO_CRT0_IMAGE_TYPE_TBYB=1)
+endif()
+
 # STA-mode status web server + mDNS (healthbar-<slug>.local). Opt-in: it pulls in
 # the lwIP mDNS responder. Build -DENABLE_STATUSD=OFF for the minimal/safe firmware.
 option(ENABLE_STATUSD "Status web server + mDNS in STA mode" ON)
@@ -142,8 +153,17 @@ endif()
 if(NOT DEFINED SPIKE_UPDATE_BASE)
     set(SPIKE_UPDATE_BASE 0x200000u)
 endif()
+if(NOT DEFINED SPIKE_TBYB)
+    set(SPIKE_TBYB 0)
+endif()
 add_executable(m6_tbyb src/m6_tbyb.c)
 target_compile_definitions(m6_tbyb PRIVATE FIRMWARE_VERSION=${FIRMWARE_VERSION} SPIKE_BUY=${SPIKE_BUY} SPIKE_ARM=${SPIKE_ARM} SPIKE_UPDATE_BASE=${SPIKE_UPDATE_BASE})
+# TBYB: flag the image-def "explicit buy" so a flash-update boot is a REVERTIBLE trial
+# (must call rom_explicit_buy to commit, else reverts). Without this, a flash-update
+# boot is permanent immediately. Set on the trial image.
+if(SPIKE_TBYB)
+    target_compile_definitions(m6_tbyb PRIVATE PICO_CRT0_IMAGE_TYPE_TBYB=1)
+endif()
 target_link_libraries(m6_tbyb pico_stdlib pico_bootrom hardware_watchdog hardware_flash hardware_sync)
 # Embed the version into the image-def so the bootrom A/B picker agrees with us.
 pico_set_program_version(m6_tbyb "${FIRMWARE_VERSION}.0")

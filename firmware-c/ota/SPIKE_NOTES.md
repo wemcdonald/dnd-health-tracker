@@ -1,9 +1,11 @@
 # Task 1 Spike Notes — RP2350 A/B + TBYB
 
-Status: **MOSTLY COMPLETE (hardware, 2026-06-28).** Tool/schema/layout PROVEN. TBYB
-**trial boot + explicit-buy commit PROVEN on real hardware.** Auto-revert: high
-confidence, final on-device confirm pending (device-access friction). One **real bug
-found + fixed** in firmware (see "RESULT 1").
+Status: **COMPLETE (hardware, 2026-06-28).** Full TBYB cycle PROVEN on real hardware:
+flash-update **trial boot** (XIP update_base), **explicit-buy commit**, AND **auto-revert**
+(un-bought TBYB trial → reverts). **Two real firmware fixes found:** (1) reboot update_base
+must be the XIP address — fixed in `0891a50`; (2) OTA image must be TBYB-flagged
+(`PICO_CRT0_IMAGE_TYPE_TBYB=1`) or there is no rollback — see RESULT 5. One on-device
+edge case left for Task 13 (TBYB image reboot before first buy w/ empty other slot).
 
 ## HARDWARE RESULTS (2026-06-28)
 
@@ -30,11 +32,22 @@ partition (0x3FE000) on every boot, and returns itself to BOOTSEL via
   needed. (No core1 in the spike; the firmware additionally resets core1 first.)
 - **RESULT 4 — `picotool reboot -g <part>` does NOT force a slot boot** (it sets the
   diagnostic partition). Forcing a specific slot is done via the FLASH_UPDATE trial only.
-- **Auto-revert — PENDING final confirm.** Mechanism + commit proven; revert is the
-  bootrom-guaranteed complement (un-bought trial → next reset returns to the committed
-  slot). Test set up (A=arm-B, B=v2-nobuy) but the device went unreachable mid-run;
-  re-confirm via: clean BOOTSEL power-cycle → boot A → no-buy trial of B → plain
-  `picotool reboot` → marker should return to 1 (A) / active stays A.
+- **RESULT 5 — TBYB requires the image-def "explicit buy" flag (CRITICAL, 2nd firmware fix).**
+  bootrom.h:912 — TBYB (run-once-then-revert) only applies to an image whose IMAGE_DEF is
+  "explicit buy" flagged. WITHOUT the flag a flash-update boot is **permanent immediately**
+  (no trial/rollback). My FIRST commit/revert reads were on UNFLAGGED images so BOTH "stuck"
+  (the apparent "commit" was permanent-by-default — misattributed). Set the flag at build
+  with **`PICO_CRT0_IMAGE_TYPE_TBYB=1`** (crt0 → `PICOBIN_IMAGE_TYPE_EXE_TBYB_BITS`);
+  `picotool info <uf2>` then shows `tbyb: not bought`. Re-tested WITH the flag on hardware:
+  - **Auto-revert PROVEN:** A(arm,XIP) → trial B(v2 nobuy, TBYB): marker 2 (B ran), active
+    stayed A; plain reboot → marker **1** (reverted to A), active A. ✓
+  - **Commit PROVEN:** A(arm,XIP) → trial B(v2 buy, TBYB): `explicit_buy` → active flipped to
+    **B** (download target → partition 0); plain reboot → stayed B (marker 2). ✓
+  → **Firmware requirement:** the OTA-PUBLISHED image MUST be built TBYB-flagged so a bad
+  update reverts. Keep the INITIAL migrate-install UNFLAGGED (permanent immediately) to dodge
+  a revert-to-empty-slot risk before the first commit. `ota_commit_if_trial()` (explicit_buy
+  after first good poll) commits the trial. STILL TO VERIFY on-device (Task 13): a TBYB-flagged
+  image that reboots BEFORE the first buy, with an empty/old other slot.
 - **Single-image-vs-per-slot:** the SAME built image runs from whichever slot the
   bootrom selects (v1 ran from A, v2 from B, same source) → single-image-via-address-
   translation confirmed; no per-slot relink needed.
