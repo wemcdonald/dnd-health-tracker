@@ -53,6 +53,9 @@ function jitter(ms: number): number {
 class CharacterManager {
   private readonly state: LiveState;
   private ws: WsListener | null = null;
+  // Set when a Cobalt cookie is configured. Mints the bearer token used for both
+  // the HP fetch (so private sheets resolve) and the game-log WSS.
+  private auth: CookieAuth | null = null;
   private stopped = false;
   private errorCount = 0;
   private pendingNudge = false;
@@ -82,14 +85,18 @@ class CharacterManager {
       lastError: null,
     };
 
-    if (cobaltCookie && character.userId && character.gameId) {
-      const auth = new CookieAuth(cobaltCookie);
-      this.ws = new WsListener(auth, character.gameId, character.userId, {
-        onNudge: () => this.nudge(),
-        onState: (connected) => {
-          this.state.wsConnected = connected;
-        },
-      });
+    // A cookie alone authenticates the HP fetch (private sheets); the WSS push
+    // additionally needs the user/game ids. Share one CookieAuth across both.
+    if (cobaltCookie) {
+      this.auth = new CookieAuth(cobaltCookie);
+      if (character.userId && character.gameId) {
+        this.ws = new WsListener(this.auth, character.gameId, character.userId, {
+          onNudge: () => this.nudge(),
+          onState: (connected) => {
+            this.state.wsConnected = connected;
+          },
+        });
+      }
     }
   }
 
@@ -196,7 +203,18 @@ class CharacterManager {
 
   private async refresh(): Promise<void> {
     try {
-      const hp = await fetchHp(this.character.characterId);
+      // Authenticate the fetch when a cookie is configured (needed for private
+      // sheets). If the token mint fails, degrade to an unauthenticated fetch —
+      // public sheets still resolve, exactly as before.
+      let token: string | undefined;
+      if (this.auth) {
+        try {
+          token = await this.auth.getToken();
+        } catch {
+          token = undefined;
+        }
+      }
+      const hp = await fetchHp(this.character.characterId, { token });
       const lit = litFromHp(hp.cur, hp.max);
       const pct = hp.max > 0 ? Math.round((100 * hp.cur) / hp.max) : 0;
       this.state.cur = hp.cur;

@@ -33,11 +33,20 @@ export class PrivateSheetError extends Error {
 }
 
 /**
- * Fetch and compute HP for a public character id.
- * @param timeoutMs abort the request after this long (default 10s).
+ * Fetch and compute HP for a character id.
+ *
+ * Public sheets need no auth. For a *private* sheet, pass `token` — the
+ * short-lived bearer minted from the Cobalt cookie (see `CookieAuth`) — and the
+ * character-service authorizes the same account that owns the sheet.
+ * @param opts.token  optional `Bearer` token for private sheets.
+ * @param opts.timeoutMs  abort the request after this long (default 10s).
  */
-export async function fetchHp(characterId: string, timeoutMs = 10_000): Promise<Hp> {
+export async function fetchHp(
+  characterId: string,
+  opts: { token?: string | undefined; timeoutMs?: number } = {},
+): Promise<Hp> {
   if (!characterId) throw new Error("ddb: empty character id");
+  const { token, timeoutMs = 10_000 } = opts;
 
   const url = `https://${HOST}${PATH_BASE}${encodeURIComponent(characterId)}`;
   const ctrl = new AbortController();
@@ -51,6 +60,7 @@ export async function fetchHp(characterId: string, timeoutMs = 10_000): Promise<
         Origin: ORIGIN,
         Referer: `${ORIGIN}/`,
         "User-Agent": USER_AGENT,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       signal: ctrl.signal,
     });

@@ -11,3 +11,6 @@ secrets.toml
 # Python
 __pycache__/
 *.pyc
+
+# Node / tooling caches
+node-compile-cache/

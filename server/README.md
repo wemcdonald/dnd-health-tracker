@@ -38,12 +38,16 @@ sheet → the file updates (≤5s via polling; instantly once WSS is configured)
 
 ## How it works
 
-- **Polling** (`character-service.dndbeyond.com`) — works on **public** characters
-  with no auth. Steady ~5s, relaxed to ~30s while the WSS is alive.
-- **WSS push** (`game-log-api-live.dndbeyond.com`) — needs a **Cobalt cookie**
-  (set it in the admin UI) plus the character's `userId`/`gameId`. Every frame
-  nudges an immediate refetch. If WSS is unavailable, polling tightens back up —
-  it is never a hard dependency.
+- **Polling** (`character-service.dndbeyond.com`) — **public** characters need no
+  auth. For a **private** sheet, set a **Cobalt cookie** in the admin UI: the
+  server mints a short-lived bearer from it and authenticates the fetch (the same
+  account that owns the sheet). Steady ~5s, relaxed to ~30s while the WSS is alive.
+- **WSS push** (`game-log-api-live.dndbeyond.com`) — needs that same **Cobalt
+  cookie** plus the character's `userId`/`gameId`. Every frame nudges an immediate
+  refetch. If WSS is unavailable, polling tightens back up — never a hard dependency.
+- **Cobalt cookie format** — paste the bare `CobaltSession` *value* (the `eyJ…`
+  blob from devtools); the server adds the `CobaltSession=` name for you. It
+  expires after a few weeks — re-paste when a private sheet goes stale.
 - HP math is a faithful port of the firmware's `hp.py` (see `src/hp.ts`).
 
 ## Config (env)

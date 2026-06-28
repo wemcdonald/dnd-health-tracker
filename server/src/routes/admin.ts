@@ -76,7 +76,7 @@ function page(): string {
         <td>${dot} ${esc(hp)}<br><small>lit ${esc(lit)} · age ${esc(age)} · ${ws}</small>${err}</td>
         <td>${c.enabled ? "yes" : "no"}</td>
         <td>
-          <a href="/dnd/${esc(c.slug)}.txt" target="_blank">.txt</a>
+          <a href="/${esc(c.slug)}.txt" target="_blank">.txt</a>
           <form method="POST" action="/admin/characters/${esc(c.slug)}/delete" style="display:inline"
                 onsubmit="return confirm('Delete ${esc(c.slug)}?')">
             ${ADMIN_PASSWORD ? '<input type="hidden" name="key" value="">' : ""}
@@ -104,7 +104,7 @@ function page(): string {
   small { color: #666; }
 </style></head><body>
 <h1>D&D Health Tracker</h1>
-<p>Each character publishes <code>/dnd/&lt;slug&gt;.txt</code> for the LED bars to poll.</p>
+<p>Each character publishes <code>/&lt;slug&gt;.txt</code> for the LED bars to poll.</p>
 ${ADMIN_PASSWORD ? '<p><small>ADMIN_PASSWORD is set — append <code>?key=…</code> and fill the key field on forms.</small></p>' : ""}
 
 <table>

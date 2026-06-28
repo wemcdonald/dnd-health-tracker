@@ -18,12 +18,33 @@ const ORIGIN = "https://www.dndbeyond.com";
 const TOKEN_SAFETY_S = 30; // refresh this many seconds before actual expiry
 const DEFAULT_TTL_S = 300; // fallback lifetime if the response omits ttl
 
+/**
+ * Normalize a pasted Cobalt credential into a valid `Cookie:` header value.
+ *
+ * Users copy the bare `CobaltSession` *value* (the `eyJ…` blob) out of devtools,
+ * with no `name=` prefix. Sent verbatim that is not a cookie, so DDB's
+ * cobalt-token endpoint replies `{"token":null}` (treated as logged-out) and
+ * every authenticated fetch silently 403s. Prepend the cookie name unless the
+ * input already looks like a `name=value` cookie string.
+ */
+export function normalizeCobaltCookie(raw: string): string {
+  const cookie = raw.trim();
+  if (!cookie) return cookie;
+  // Already named (`CobaltSession=…`) or a full multi-cookie header (`a=b; c=d`).
+  // A bare CobaltSession value is a JWE (`eyJ…`) with no cookie name; prefix it.
+  if (/CobaltSession=/i.test(cookie) || cookie.includes(";")) return cookie;
+  return `CobaltSession=${cookie}`;
+}
+
 /** Turns a Cobalt cookie into a cached, auto-refreshing bearer token. */
 export class CookieAuth {
   private token: string | null = null;
   private expiresAtMs = 0;
+  private readonly cookie: string;
 
-  constructor(private readonly cookie: string) {}
+  constructor(cookie: string) {
+    this.cookie = normalizeCobaltCookie(cookie);
+  }
 
   /** Return a currently-valid bearer token, refreshing if needed. */
   async getToken(): Promise<string> {
