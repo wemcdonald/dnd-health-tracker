@@ -39,3 +39,7 @@ set *args:
 publish-fw:
     FIRMWARE_DIR="{{justfile_directory()}}/server/firmware" \
         node "{{justfile_directory()}}/server/tools/publish-fw.mjs" "{{build_dir}}/m1_portal.bin"
+
+# run host-compiled C unit tests (no hardware)
+test-host:
+    bash firmware-c/test/run.sh
