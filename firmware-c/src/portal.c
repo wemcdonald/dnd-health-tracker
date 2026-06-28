@@ -45,6 +45,7 @@
 #include "boot_mode.h"
 #include "provision.h"
 #include "configform.h"
+#include "ota.h"
 
 /* ── Constants ────────────────────────────────────────────────────────────── */
 
@@ -306,6 +307,19 @@ static void run_poll_loop(const char *slug) {
     printf("poll: target http://%s:%d%s (resolve %s)\n",
            POLL_HOST, (int)POLL_PORT, path, resolved ? "ok" : "FAILED");
 
+    /* Boot-only OTA check: if the server has a newer image, download+verify+arm a
+     * trial reboot now (before we start tracking HP). Best-effort: only when DNS
+     * resolved; OTA_NONE/OTA_ERROR fall through and run normally on the current image. */
+    if (resolved) {
+        ota_result_t ota = ota_check_and_update(&srv, (uint16_t)POLL_PORT, POLL_HOST);
+        if (ota == OTA_ARMED) {
+            printf("OTA armed; rebooting into trial image...\n");
+            /* Device reboots ~100ms after arming. Spin feeding the watchdog. */
+            while (true) { watchdog_update(); sleep_ms(10); }
+        }
+    }
+
+    static bool committed = false;
     int last_cur = -1;
     while (true) {
         watchdog_update();
@@ -317,6 +331,7 @@ static void run_poll_loop(const char *slug) {
                 printf("poll: cur=%d max=%d temp=%d age=%ds%s\n", cur, max, temp, age,
                        cur != last_cur ? "  <-- changed" : "");
                 health_set_hp(cur, max, temp, age);   /* drives the LED bar */
+                if (!committed) { ota_commit_if_trial(); committed = true; }
                 last_cur = cur;
             } else {
                 printf("poll: FAILED (offline)\n");
@@ -495,6 +510,7 @@ int main(void) {
      * core1 only touches the LED PIO + shared health state. */
     health_init();
     leds_launch();
+    config_set_core1_running(true);  /* OTA flash ops must stop the LED core before erase/program */
 
     /* Hardware watchdog: a genuine core0 hang/panic reboots after ~8s instead of
      * bricking until a manual BOOTSEL. Fed by core0's loops only — NOT core1:

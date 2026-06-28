@@ -21,11 +21,14 @@ default:
     @just --list
 
 # build the generic firmware
-build:
-    cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake -B build -DPICO_BOARD=pico2_w \
+build version="1":
+    #!/usr/bin/env sh
+    # Strip 'version=' prefix if just passes the arg as a positional (set positional-arguments quirk).
+    arg="${1:-1}"; FW_VERSION="${arg#version=}"
+    (cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake -B build -DPICO_BOARD=pico2_w \
         -DPOLL_HOST=dndhealth.willflix.org -DPOLL_PORT=80 -DENABLE_STATUSD=ON \
-        -DHEALTHBAR_NAME= -DDEV_SEED_CONFIG=OFF
-    cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake --build build -j4 --target m1_portal
+        -DHEALTHBAR_NAME= -DDEV_SEED_CONFIG=OFF -DFIRMWARE_VERSION="$FW_VERSION")
+    (cd firmware-c && PICO_SDK_PATH={{pico_sdk}} cmake --build build -j4 --target m1_portal)
 
 # flash over USB (no BOOTSEL)
 deploy:

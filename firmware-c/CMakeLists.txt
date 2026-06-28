@@ -47,6 +47,11 @@ pico_enable_stdio_usb(m5_ledtest 1)
 pico_enable_stdio_uart(m5_ledtest 1)
 pico_add_extra_outputs(m5_ledtest)
 
+# Firmware version for OTA version gating. Pass -DFIRMWARE_VERSION=N on the cmake line.
+if(NOT DEFINED FIRMWARE_VERSION)
+    set(FIRMWARE_VERSION 1)
+endif()
+
 # ─── M1: captive portal ──────────────────────────────────────────────────────
 add_executable(m1_portal
     src/portal.c
@@ -99,6 +104,9 @@ target_compile_definitions(m1_portal PRIVATE HEALTHBAR_NAME="${HEALTHBAR_NAME}")
 set(POLL_HOST "dndhealth.willflix.org" CACHE STRING "Server host the device polls")
 set(POLL_PORT "80" CACHE STRING "Server port the device polls")
 target_compile_definitions(m1_portal PRIVATE POLL_HOST="${POLL_HOST}" POLL_PORT=${POLL_PORT})
+target_compile_definitions(m1_portal PRIVATE FIRMWARE_VERSION=${FIRMWARE_VERSION})
+# Embed the same version into the image-def so the bootrom A/B picker agrees with us.
+pico_set_program_version(m1_portal "${FIRMWARE_VERSION}.0")
 
 # STA-mode status web server + mDNS (healthbar-<slug>.local). Opt-in: it pulls in
 # the lwIP mDNS responder. Build -DENABLE_STATUSD=OFF for the minimal/safe firmware.
@@ -124,9 +132,7 @@ pico_add_extra_outputs(m1_portal)
 
 # ─── SPIKE (Task 1, THROWAWAY): RP2350 A/B + TBYB proof ───────────────────────
 # Build with -DFIRMWARE_VERSION=1 then =2. Removed at end of Task 1.
-if(NOT DEFINED FIRMWARE_VERSION)
-    set(FIRMWARE_VERSION 1)
-endif()
+# (FIRMWARE_VERSION default is set above, before m1_portal.)
 if(NOT DEFINED SPIKE_BUY)
     set(SPIKE_BUY 0)
 endif()
