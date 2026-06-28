@@ -24,4 +24,18 @@ bool http_poll_once(const ip_addr_t *ip, uint16_t port, const char *host,
                     const char *path, int *cur, int *max, int *temp, int *age_s,
                     uint32_t timeout_ms);
 
+/* Generic GET: copies response body (after headers) into out (<= out_cap-1,
+ * NUL-terminated). Returns body length, or -1 on failure (connect/timeout/
+ * non-200). Body is delimited by the remote close (Connection: close). */
+int http_get_body(const ip_addr_t *ip, uint16_t port, const char *host,
+                  const char *path, char *out, size_t out_cap, uint32_t timeout_ms);
+
+/* Streamed GET: after skipping headers, invokes sink(ctx, chunk, len) for each
+ * body chunk as it arrives (no whole-image buffering). Returns total body bytes
+ * forwarded, or -1 on failure. If sink returns false, the transfer aborts and
+ * returns -1. */
+int http_get_stream(const ip_addr_t *ip, uint16_t port, const char *host, const char *path,
+                    bool (*sink)(void *ctx, const uint8_t *data, size_t len), void *ctx,
+                    uint32_t timeout_ms);
+
 #endif /* HEALTHBAR_HTTP_POLL_H */

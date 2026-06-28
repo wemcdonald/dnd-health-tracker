@@ -63,6 +63,7 @@ add_executable(m1_portal
     src/ota_manifest.c
     src/ota_sink.c
     src/ota_flash.c
+    src/ota.c
 )
 
 pico_generate_pio_header(m1_portal ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
