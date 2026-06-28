@@ -46,3 +46,19 @@ publish-fw:
 # run host-compiled C unit tests (no hardware)
 test-host:
     bash firmware-c/test/run.sh
+
+# ONE-TIME: convert a device from the single-image layout to the A/B OTA layout.
+# Device must be USB-connected in BOOTSEL. Config auto-migrates from the legacy
+# last-sector on first boot. Back up the device's wifi/slug first (open its status
+# page at healthbar-<slug>.local) — full runbook + recovery in firmware-c/ota/MIGRATION.md.
+migrate-ota version="1":
+    #!/usr/bin/env sh
+    set -e
+    # Strip 'version=' prefix if just passes the arg positionally (set positional-arguments quirk).
+    arg="${1:-1}"; FW_VERSION="${arg#version=}"
+    just build version="$FW_VERSION"                       # build the app first (no device needed)
+    cd firmware-c
+    picotool partition create ota/partition_table.json build/pt.uf2
+    picotool load build/pt.uf2 -f                          # write the A/B partition table
+    picotool reboot -u && sleep 2                          # reboot so the bootrom registers the PT
+    picotool load build/m1_portal.uf2 -p 0 -f -x           # flash slot A (partition index 0) and run
