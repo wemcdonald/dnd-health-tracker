@@ -91,6 +91,10 @@ bool config_save(persist_t *cfg) {
     flash_range_program(CONFIG_FLASH_OFFSET, buf, CONFIG_PROG_SIZE);
     restore_interrupts(ints);
 
+    /* Verify the exact location just written. NOT config_load() — that now does
+     * legacy→partition migration, so on a failed partition write it would fall
+     * back to legacy and re-enter config_save, recursing into an infinite
+     * flash-erase/program loop. read_at is non-recursive by construction. */
     persist_t check;
-    return config_load(&check);
+    return read_at(CONFIG_FLASH_OFFSET, &check);
 }
