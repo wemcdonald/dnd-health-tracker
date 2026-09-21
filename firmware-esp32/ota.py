@@ -24,6 +24,10 @@ so importing this module is harmless off-device.
 
 import version
 
+# This build's board namespace on the server. Firmware images are served per
+# board (/firmware/<board>/...) so a Pico image can never reach an ESP32.
+BOARD = "esp32"
+
 _SHA_RE_LEN = 64
 
 
@@ -73,7 +77,7 @@ def check(dev):
     version is strictly newer than ours.
     """
     import poll
-    body = poll.http_get(dev.server_host, "/firmware/latest",
+    body = poll.http_get(dev.server_host, "/firmware/%s/latest" % BOARD,
                          port=dev.server_port, timeout=8)
     m = parse_manifest(body)
     if not m:

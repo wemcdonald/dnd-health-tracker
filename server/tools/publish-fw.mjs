@@ -1,21 +1,40 @@
 #!/usr/bin/env node
+// Publish an OTA image for one board into the server's per-board firmware feed.
+//
+//   publish-fw.mjs <board> <path-to-image.bin> [version]
+//
+// Images are namespaced per board so a Pico image can never be served to an
+// ESP32 (which would brick it). This writes FIRMWARE_DIR/<board>/{image.bin,
+// manifest.txt} with an imagePath of /firmware/<board>/image.bin — the exact
+// path the device fetches. Keeping this the single publish path is what makes
+// serving updates for multiple architectures foolproof.
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-const [, , imagePath, versionArg] = process.argv;
-if (!imagePath) {
-  console.error("usage: publish-fw.mjs <path-to-image.bin> [version]");
+// Per-board max image size (must not exceed the board's OTA slot/partition).
+// Pico: A/B slot capacity 1992 KiB. ESP32: MicroPython dual-OTA app partition
+// (conservative default; override with FW_MAX_BYTES if your partition differs).
+const BOARD_MAX_BYTES = {
+  pico: 1992 * 1024,
+  esp32: Number(process.env.FW_MAX_BYTES) || 1966080, // 1920 KiB default
+};
+
+const [, , board, imagePath, versionArg] = process.argv;
+if (!board || !imagePath || !(board in BOARD_MAX_BYTES)) {
+  console.error(`usage: publish-fw.mjs <${Object.keys(BOARD_MAX_BYTES).join("|")}> <path-to-image.bin> [version]`);
   process.exit(1);
 }
-const outDir = process.env.FIRMWARE_DIR ?? join(process.cwd(), "firmware");
+
+const root = process.env.FIRMWARE_DIR ?? join(process.cwd(), "firmware");
+const outDir = join(root, board);
 mkdirSync(outDir, { recursive: true });
 
 const manifestPath = join(outDir, "manifest.txt");
 // The published manifest version MUST match the version baked into the image
 // (the device gates updates on manifest.version > its baked FIRMWARE_VERSION).
-// `just publish-fw version=N` passes N here so the two stay consistent; if no
-// explicit version is given, fall back to auto-incrementing the prior manifest.
+// An explicit version keeps the two consistent; otherwise auto-increment this
+// board's prior manifest.
 let nextVersion;
 if (versionArg !== undefined && Number.isInteger(Number(versionArg))) {
   nextVersion = Number(versionArg);
@@ -29,15 +48,14 @@ if (versionArg !== undefined && Number.isInteger(Number(versionArg))) {
 }
 
 const bytes = readFileSync(imagePath);
-// Must match firmware OTA_MAX_IMAGE_BYTES (A/B slot capacity = 1992 KiB).
 // Refuse oversized images at publish time so the failure is loud here rather
-// than a silent no-update on the device (the firmware parser rejects them).
-const OTA_MAX_IMAGE_BYTES = 1992 * 1024;
-if (bytes.length > OTA_MAX_IMAGE_BYTES) {
-  console.error(`image is ${bytes.length} bytes, exceeds OTA_MAX_IMAGE_BYTES (${OTA_MAX_IMAGE_BYTES}); refusing to publish`);
+// than a silent no-update on the device (the firmware parser rejects them too).
+const maxBytes = BOARD_MAX_BYTES[board];
+if (bytes.length > maxBytes) {
+  console.error(`image is ${bytes.length} bytes, exceeds ${board} max (${maxBytes}); refusing to publish`);
   process.exit(1);
 }
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 copyFileSync(imagePath, join(outDir, "image.bin"));
-writeFileSync(manifestPath, `${nextVersion} ${bytes.length}\n${sha256}\n/firmware/image.bin\n`);
-console.log(`published firmware v${nextVersion} (${bytes.length} bytes, sha256 ${sha256})`);
+writeFileSync(manifestPath, `${nextVersion} ${bytes.length}\n${sha256}\n/firmware/${board}/image.bin\n`);
+console.log(`published ${board} firmware v${nextVersion} (${bytes.length} bytes, sha256 ${sha256}) -> ${outDir}`);

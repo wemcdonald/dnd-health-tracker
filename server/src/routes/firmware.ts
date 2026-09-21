@@ -5,10 +5,26 @@ import { readFirmwareManifest, firmwareManifestText } from "../firmware.js";
 
 type Opts = FastifyPluginOptions & { firmwareDir: string };
 
-export async function firmwareRoutes(app: FastifyInstance, opts: Opts) {
-  const dir = opts.firmwareDir;
+/**
+ * Firmware images are namespaced **per board** so an image for one architecture
+ * can never be served to (and brick) another. A device fetches its own board's
+ * feed:  /firmware/<board>/latest  +  /firmware/<board>/image.bin
+ *
+ * `board` is allow-listed (never used to build a path until it matches), which
+ * also blocks path traversal. Add new boards here as they ship.
+ */
+const ALLOWED_BOARDS = new Set(["pico", "esp32"]);
 
-  app.get("/firmware/latest", async (_req, reply) => {
+export async function firmwareRoutes(app: FastifyInstance, opts: Opts) {
+  const root = opts.firmwareDir;
+
+  // Resolve the per-board dir, or null if the board isn't recognised.
+  const boardDir = (board: string): string | null =>
+    ALLOWED_BOARDS.has(board) ? join(root, board) : null;
+
+  app.get<{ Params: { board: string } }>("/firmware/:board/latest", async (req, reply) => {
+    const dir = boardDir(req.params.board);
+    if (!dir) return reply.code(404).type("text/plain; charset=utf-8").send("unknown board\n");
     const m = readFirmwareManifest(dir);
     if (!m) return reply.code(404).type("text/plain; charset=utf-8").send("no firmware\n");
     return reply
@@ -17,7 +33,9 @@ export async function firmwareRoutes(app: FastifyInstance, opts: Opts) {
       .send(firmwareManifestText(m));
   });
 
-  app.get("/firmware/image.bin", async (req, reply) => {
+  app.get<{ Params: { board: string } }>("/firmware/:board/image.bin", async (req, reply) => {
+    const dir = boardDir(req.params.board);
+    if (!dir) return reply.code(404).type("text/plain; charset=utf-8").send("unknown board\n");
     const path = join(dir, "image.bin");
     let total: number;
     try {

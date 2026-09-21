@@ -62,9 +62,11 @@ static bool dl_chunk(void *vctx, const uint8_t *data, size_t len) {
 
 ota_result_t ota_check_and_update(const ip_addr_t *srv, uint16_t port, const char *host) {
     /* 1. Fetch the manifest. Not-published / unreachable is NON-fatal: stay on the
-     *    current image and try again next cycle. */
+     *    current image and try again next cycle.
+     *    Images are served per board (/firmware/<board>/...) so a Pico image can
+     *    never reach an ESP32; this is the Pico build. */
     char body[256];
-    int n = http_get_body(srv, port, host, "/firmware/latest", body, sizeof(body), 4000);
+    int n = http_get_body(srv, port, host, "/firmware/pico/latest", body, sizeof(body), 4000);
     if (n <= 0) return OTA_NONE;
 
     /* 2. Parse + version-gate. */
