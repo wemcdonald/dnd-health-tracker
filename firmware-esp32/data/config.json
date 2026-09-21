@@ -1,0 +1,10 @@
+{
+  "player_name": "",
+  "slug": "",
+  "server_host": "dndhealth.willflix.org",
+  "server_port": 80,
+  "num_leds": 16,
+  "gpio_pin": 10,
+  "brightness": 0.5,
+  "poll_seconds": 5.0
+}

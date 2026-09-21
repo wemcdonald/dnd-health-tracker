@@ -13,6 +13,10 @@ Runs on a **Raspberry Pi Pico 2 W** (RP2350 microcontroller) in MicroPython.
   running the tests/sim.
 - **[`docs/plans/`](docs/plans/)** — design docs. Current:
   [`2026-06-24-pico2w-healthbar-design.md`](docs/plans/2026-06-24-pico2w-healthbar-design.md).
+- **[`docs/hardware-build.md`](docs/hardware-build.md)** — physical build: battery
+  charging (Pico LiPo SHIM) and USB-C breakout wiring to the Pico 2 W test pads.
+- **[`firmware-esp32/`](firmware-esp32/)** — ESP32 (XIAO ESP32-C3) MicroPython
+  port: thin poller + OTA. Forward path; see its README.
 - **[`legacy-go/`](legacy-go/)** — the original Go implementation for the
   Raspberry Pi Zero 2 W (full Linux). Superseded by the Pico 2 W rewrite; kept
   for reference and history.
