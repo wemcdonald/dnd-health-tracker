@@ -52,6 +52,28 @@ def test_save_identity_roundtrip():
         assert device.load_identity(d) == {"token": "c" * 32, "config_rev": 5}
 
 
+def test_load_identity_creates_missing_data_dir():
+    # Simulates a full flash erase: /data doesn't exist yet on first boot.
+    with tempfile.TemporaryDirectory() as d:
+        data_dir = d + "/data"
+        assert not os.path.isdir(data_dir)
+        ident = device.load_identity(data_dir, token_factory=lambda: "e" * 32)
+        assert ident["token"] == "e" * 32
+        with open(data_dir + "/device.json") as f:
+            assert json.load(f)["token"] == "e" * 32
+
+
+def test_load_identity_survives_unwritable_flash():
+    # Parent directory doesn't exist and can't be created with a single-level
+    # mkdir -> save fails, but the board must still boot with an in-memory identity.
+    with tempfile.TemporaryDirectory() as d:
+        data_dir = d + "/no/such/dir"
+        ident = device.load_identity(data_dir, token_factory=lambda: "f" * 32)
+        assert ident["token"] == "f" * 32
+        assert ident["config_rev"] == 0
+        assert not os.path.exists(data_dir + "/device.json")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

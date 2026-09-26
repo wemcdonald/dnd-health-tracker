@@ -47,7 +47,10 @@ def load_identity(data_dir="data", token_factory=new_token):
     ident = {"token": d.get("token"), "config_rev": rev}
     if not _valid_token(ident["token"]):
         ident["token"] = token_factory()
-        save_identity(ident, data_dir)
+        try:
+            save_identity(ident, data_dir)
+        except OSError:
+            pass  # unwritable flash: still boot, just with an in-memory-only identity
     return ident
 
 

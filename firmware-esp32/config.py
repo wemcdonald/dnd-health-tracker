@@ -121,7 +121,18 @@ def _read_json(path, default):
 
 
 def _write_json(path, obj):
-    """Atomically write obj as JSON: write a temp file then rename over path."""
+    """Atomically write obj as JSON: write a temp file then rename over path.
+
+    Creates the immediate parent directory if it's missing (e.g. /data on a
+    freshly flash-erased board). Single-level mkdir only -- MicroPython's os
+    has no makedirs, and callers here only ever nest one level deep.
+    """
+    if "/" in path:
+        parent = path.rsplit("/", 1)[0]
+        try:
+            os.mkdir(parent)
+        except OSError:
+            pass  # already exists, or parent's parent is also missing
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(obj, f)
