@@ -107,7 +107,14 @@ class NetManager:
     def connected_ssid(self):
         try:
             if self._sta is not None and self._sta.isconnected():
-                return self._sta.config("ssid")
+                try:
+                    ssid = self._sta.config("ssid")
+                except Exception:
+                    ssid = None
+                # A falsy/failed live read while connected must not read as "no
+                # SSID" -- that would let a pushed wifi remove delete the network
+                # the board is currently on. Fall back to what connect_known saw.
+                return ssid or self._connected_ssid
         except Exception:
             pass
         return None

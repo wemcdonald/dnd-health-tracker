@@ -60,6 +60,24 @@ def _monotonic():
         return time.monotonic()
 
 
+def _ticks():
+    """Raw monotonic tick count (ms). Wraps at 2**30 ms (~12.4 days) on MicroPython."""
+    import time
+    try:
+        return time.ticks_ms()
+    except AttributeError:
+        return int(time.monotonic() * 1000)
+
+
+def _elapsed_s(t0):
+    """Seconds elapsed since tick t0 from _ticks(), correct across a ticks_ms() wrap."""
+    import time
+    try:
+        return time.ticks_diff(_ticks(), t0) / 1000
+    except AttributeError:
+        return (_ticks() - t0) / 1000
+
+
 def _sleep(d):
     import time
     time.sleep(d)
@@ -141,21 +159,20 @@ def _config_check(dev, net, ident, strip):
 
 def _run_mode(dev, engine, net, ident, strip):
     engine.set_status(anim.ONLINE)
-    started = _monotonic()
-    last_ota = -OTA_CHECK_EVERY_S   # check for an update on the first good poll
-    last_cfg = started              # _run just did a config check
+    started = _ticks()
+    last_ota = None      # None = never checked; check on the first good poll
+    last_cfg = started   # _run just did a config check
     offline_since = None
     image_confirmed = False
 
     while True:
         data = poll.fetch(dev)
-        now = _monotonic()
 
         if data is None:
             engine.set_status(anim.OFFLINE)
             if offline_since is None:
-                offline_since = now
-            elif now - offline_since > OFFLINE_RESET_SECONDS:
+                offline_since = _ticks()
+            elif _elapsed_s(offline_since) > OFFLINE_RESET_SECONDS:
                 _reset()  # reboot -> reconnect, or fall into setup if it fails
         else:
             # The server answered (health line or 404 unknown-slug): network and
@@ -170,8 +187,8 @@ def _run_mode(dev, engine, net, ident, strip):
                 cur, mx, temp, age = data
                 engine.set_health(anim.Health(cur, mx, temp))
                 engine.set_status(anim.ONLINE)
-            if (now - last_ota) > OTA_CHECK_EVERY_S:
-                last_ota = now
+            if last_ota is None or _elapsed_s(last_ota) > OTA_CHECK_EVERY_S:
+                last_ota = _ticks()
                 try:
                     manifest, available = ota.check(dev)
                     if available and ota.apply_update(dev, manifest):
@@ -179,11 +196,11 @@ def _run_mode(dev, engine, net, ident, strip):
                 except Exception:
                     pass  # OTA is best-effort; never let it wedge the bar
 
-        if not image_confirmed and now - started > PROBATION_S:
+        if not image_confirmed and _elapsed_s(started) > PROBATION_S:
             _reset()  # a pending-verify image that never reached the server rolls back
 
-        if now - last_cfg > remote_config.CHECK_EVERY_S:
-            last_cfg = now
+        if _elapsed_s(last_cfg) > remote_config.CHECK_EVERY_S:
+            last_cfg = _ticks()
             dev = _config_check(dev, net, ident, strip)
 
         gc.collect()
