@@ -1,3 +1,3 @@
-2 1495936
-9dc4b90c3393dcf433398be9b7dd1dbe76f7774c2708b4f27cdfac3bbb587dea
-/firmware/esp32/image.bin
+2 1496192
+09e640a411b5325eaab2c3219735e3291656519071cfadeaab09f29506c01d26
+/firmware/esp32/image.bin?v=2
