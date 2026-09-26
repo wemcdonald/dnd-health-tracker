@@ -8,6 +8,7 @@ import formbody from "@fastify/formbody";
 import { dndRoutes } from "./routes/dnd.js";
 import { adminRoutes } from "./routes/admin.js";
 import { firmwareRoutes } from "./routes/firmware.js";
+import { deviceRoutes } from "./routes/device.js";
 import { syncManagers, stopAllManagers } from "./manager.js";
 
 const PORT = Number(process.env["PORT"] ?? 8080);
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: true });
   await app.register(formbody); // parse application/x-www-form-urlencoded posts
   await app.register(dndRoutes);
+  await app.register(deviceRoutes);
   await app.register(adminRoutes);
   await app.register(firmwareRoutes, { firmwareDir: process.env.FIRMWARE_DIR ?? "firmware" });
 
