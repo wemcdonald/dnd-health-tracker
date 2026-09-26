@@ -51,9 +51,13 @@ another:
   <imagePath>
   ```
   `version` monotonic int; `size` bytes; `sha256` 64 lowercase hex of the image;
-  `imagePath` absolute, `/firmware/<board>/image.bin`.
+  `imagePath` absolute, `/firmware/<board>/image.bin?v=<version>`. Devices fetch
+  it verbatim; the `?v=` gives every version its own CDN cache key (the server
+  ignores the query string).
 - `GET /firmware/<board>/image.bin` → the raw image (`application/octet-stream`,
-  `Accept-Ranges: bytes`; supports `bytes=START-END` / `bytes=START-` ranges).
+  `Accept-Ranges: bytes`, `Cache-Control: no-store`; supports `bytes=START-END` /
+  `bytes=START-` ranges). Never cacheable: Cloudflare otherwise caches `.bin` for
+  hours and would serve a stale image after a republish.
 
 **Device flow (identical on both boards):** fetch the manifest; if
 `version > FIRMWARE_VERSION` (esp32: and not a version that already rolled

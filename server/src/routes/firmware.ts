@@ -43,7 +43,12 @@ export async function firmwareRoutes(app: FastifyInstance, opts: Opts) {
     } catch {
       return reply.code(404).type("text/plain; charset=utf-8").send("no image\n");
     }
-    reply.header("Accept-Ranges", "bytes").type("application/octet-stream");
+    // no-store: Cloudflare otherwise caches .bin for hours, so a republished
+    // image would be served stale and fail the device's SHA-256 check.
+    reply
+      .header("Accept-Ranges", "bytes")
+      .header("Cache-Control", "no-store")
+      .type("application/octet-stream");
 
     const range = req.headers.range;
     if (range) {

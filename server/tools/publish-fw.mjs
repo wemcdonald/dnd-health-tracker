@@ -5,8 +5,10 @@
 //
 // Images are namespaced per board so a Pico image can never be served to an
 // ESP32 (which would brick it). This writes FIRMWARE_DIR/<board>/{image.bin,
-// manifest.txt} with an imagePath of /firmware/<board>/image.bin — the exact
-// path the device fetches. Keeping this the single publish path is what makes
+// manifest.txt} with an imagePath of /firmware/<board>/image.bin?v=<version> — the
+// exact path the device fetches. The ?v= gives each version its own CDN cache
+// key, so a republish can never be served a stale cached image; the server
+// ignores the query string. Keeping this the single publish path is what makes
 // serving updates for multiple architectures foolproof.
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -56,5 +58,5 @@ if (bytes.length > maxBytes) {
 }
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 copyFileSync(imagePath, join(outDir, "image.bin"));
-writeFileSync(manifestPath, `${nextVersion} ${bytes.length}\n${sha256}\n/firmware/${board}/image.bin\n`);
+writeFileSync(manifestPath, `${nextVersion} ${bytes.length}\n${sha256}\n/firmware/${board}/image.bin?v=${nextVersion}\n`);
 console.log(`published ${board} firmware v${nextVersion} (${bytes.length} bytes, sha256 ${sha256}) -> ${outDir}`);

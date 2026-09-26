@@ -122,6 +122,21 @@ describe("GET /firmware/:board/image.bin", () => {
     expect(res.headers["accept-ranges"]).toBe("bytes");
     expect(res.body).toBe("HELLO-FIRMWARE-IMAGE-BYTES");
   });
+  it("is never cacheable (a CDN would serve a stale image after a republish)", async () => {
+    const { app } = appWithImage("esp32");
+    const full = await app.inject({ method: "GET", url: "/firmware/esp32/image.bin" });
+    expect(full.headers["cache-control"]).toBe("no-store");
+    const part = await app.inject({
+      method: "GET", url: "/firmware/esp32/image.bin", headers: { range: "bytes=0-4" },
+    });
+    expect(part.headers["cache-control"]).toBe("no-store");
+  });
+  it("ignores a cache-busting query string", async () => {
+    const { app } = appWithImage("esp32");
+    const res = await app.inject({ method: "GET", url: "/firmware/esp32/image.bin?v=7" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toBe("HELLO-FIRMWARE-IMAGE-BYTES");
+  });
   it("serves a byte range as 206", async () => {
     const { app } = appWithImage("esp32");
     const res = await app.inject({
