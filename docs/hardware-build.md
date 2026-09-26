@@ -110,10 +110,15 @@ Under evaluation to collapse the Pico + LiPo SHIM + USB-C breakout stack. Baseli
 
 - **Board:** Seeed XIAO ESP32-C3 — USB-C, external u.FL antenna. (It has onboard
   LiPo charging, but see the power note below for why we drive charging off-board.)
-- **LED data pin:** **GPIO10 (pad D10)** — non-strapping, non-UART. Level shifter
-  still needed (3.3 V→5 V), or run the strip at ~4.5 V.
+- **LED data pin:** **pad D1 = GPIO3** — clean (not strapping/boot GPIO2/8/9, not
+  UART GPIO20/21, no default bus). Set `gpio_pin: 3` (the GPIO number, not "D1").
+  Wire **D1 → strip DIN directly**: off the LiPo the strip runs at ~3.7–4.2 V, so
+  its logic-high threshold is cleared by 3.3 V data — no level shifter or series
+  resistor needed for a short lead (add a 220–470 Ω series only if the first pixel
+  glitches).
+- **Power the XIAO at BAT+ / BAT−** (underside pads, battery input) — not 5V/3V3.
 - **Power the strip from battery voltage**, not the 3V3 rail (500 mA cap); keep
-  brightness modest on battery. Common ground.
+  brightness modest on battery. Common ground across XIAO, strip, and charger OUT−.
 - **Power + switch (recommended):** a **standalone protected LiPo charger board**
   (e.g. TP4056 + DW01/FS8205) with separate `B±` (cell) and `OUT±` (device)
   terminals. Put a plain **SPST switch on `OUT+`** feeding the XIAO BAT pad + strip:

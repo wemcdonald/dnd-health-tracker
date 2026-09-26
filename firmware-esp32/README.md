@@ -40,9 +40,12 @@ cold-load hang), `neopixel` over RMT, and built-in dual-app OTA with rollback.
 
 Chosen pin (you can override via `gpio_pin` in `data/config.json`):
 
-| Signal | XIAO C3 pad | GPIO | Why |
+| Signal | XIAO C3 pad | GPIO (`gpio_pin`) | Why |
 |--------|-------------|------|-----|
-| **WS2812B data** | **D10** | **GPIO10** | Not a strapping pin (avoids GPIO2/8/9), not UART0 (avoids GPIO20/21), free of the I²C/SPI defaults you might want for Qwiic. Clean for a single RMT output. |
+| **WS2812B data** | **D1** | **GPIO3** | Clean pin: not a strapping/boot pin (avoids GPIO2/8/9 = D0/D8/D9), not UART0 (avoids GPIO20/21 = D6/D7), no default I²C/SPI bus. `config.json` `gpio_pin` uses the **GPIO number (3)**, not the pad label. |
+
+Power the XIAO at its underside **BAT+ / BAT−** pads (battery input, 3.7–4.2 V) —
+not the 5V/3V3 pins. Common ground across XIAO, strip, and the charger's `OUT−`.
 
 - WS2812B data is 5 V logic; the ESP32 drives 3.3 V. Use a level shifter
   (e.g. 74AHCT125) **or** power the strip at ~4.5 V so its logic-high threshold

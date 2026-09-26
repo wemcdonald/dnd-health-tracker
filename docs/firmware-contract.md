@@ -83,7 +83,7 @@ device filesystem, not in the image):
 | `server_host` | server hostname | default `dndhealth.willflix.org` |
 | `server_port` | port | default `80` |
 | `num_leds` | strip length | default `16` |
-| `gpio_pin` | WS2812 data pin | pico default `18`; esp32 default `10` |
+| `gpio_pin` | WS2812 data pin (chip GPIO number) | pico default `18`; esp32 default `3` (pad D1) |
 | `brightness` | 0..1 hardware brightness | |
 | `poll_seconds` | HP poll interval | |
 

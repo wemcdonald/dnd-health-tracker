@@ -27,9 +27,10 @@ DEFAULT_DEVICE = {
     "server_host": "dndhealth.willflix.org",
     "server_port": 80,               # plain HTTP (device has no TLS)
     "num_leds": 16,
-    # LED data GPIO. Default 10 = XIAO ESP32-C3 pad "D10"/GPIO10 (SPI MOSI) — a
-    # safe, non-strapping, non-UART pin. See firmware-esp32/README.md#pins.
-    "gpio_pin": 10,
+    # LED data GPIO (the *chip* GPIO number, not the "D" pad label). Default 3 =
+    # XIAO ESP32-C3 pad "D1"/GPIO3 — a clean non-strapping, non-UART, non-bus pin.
+    # See firmware-esp32/README.md#pins.
+    "gpio_pin": 3,
     "brightness": 0.5,               # hardware brightness 0..1
     "poll_seconds": 5.0,             # HP poll interval
 }
