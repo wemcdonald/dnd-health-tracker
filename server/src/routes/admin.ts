@@ -8,7 +8,7 @@
  *   POST /admin/devices/:mac           -> set a board's managed config (label/slug/brightness/pollSeconds)
  *   POST /admin/devices/:mac/wifi      -> add/update or remove a managed WiFi row for a board
  *   POST /admin/devices/:mac/wifi/delete -> stop managing a WiFi row for a board
- *   POST /admin/devices/:mac/forget    -> clear a board's token (next check-in re-registers)
+ *   POST /admin/devices/:mac/forget    -> clear a board's token and managed WiFi (next check-in re-registers)
  *   POST /admin/devices/:mac/delete    -> remove a board and its managed settings
  *
  * SECURITY: this UI has no built-in auth and exposes setting the Cobalt cookie (a
@@ -96,7 +96,7 @@ function boardsSection(knownSlugs: ReadonlySet<string>): string {
 <legend><code>${esc(formatMac(d.mac))}</code> ${esc(d.label)}</legend>
 <p><small>last seen ${esc(ago(d.lastSeen))} · fw v${esc(d.fwVersion || "?")} · LAN ${esc(d.localIp || "?")}
  · showing <code>${esc(d.reportedSlug || "—")}</code>${slugWarn} · rev ${d.configRev}
- ${d.tokenSha256 === null ? " · <b>forgotten: re-registers on next check-in</b>" : ""}</small></p>
+ ${d.tokenSha256 === null ? " · <b>forgotten: re-registers on next check-in (managed WiFi cleared)</b>" : ""}</small></p>
 <form method="POST" action="${base}">${keyField}
   <label>label <input type="text" name="label" value="${esc(d.label)}"></label>
   <label>slug (blank = not managed) <input type="text" name="slug" value="${esc(d.slug ?? "")}" list="slugs"></label>
@@ -113,7 +113,7 @@ ${wifiRows || '<tr><td colspan="4"><em>no managed networks</em></td></tr>'}</tab
   <label>action <select name="action"><option value="upsert">add/update</option><option value="remove">remove from board</option></select></label>
   <button type="submit">save network</button>
 </form>
-<form method="POST" action="${base}/forget" style="display:inline" onsubmit="return confirm('Forget this board? Its next check-in re-registers.')">${keyField}<button>forget token</button></form>
+<form method="POST" action="${base}/forget" style="display:inline" onsubmit="return confirm('Forget this board? Its next check-in re-registers; managed WiFi networks (and their passwords) are deleted.')">${keyField}<button>forget token</button></form>
 <form method="POST" action="${base}/delete" style="display:inline" onsubmit="return confirm('Delete this board and its settings?')">${keyField}<button>delete board</button></form>
 </fieldset>`;
   }).join("\n");

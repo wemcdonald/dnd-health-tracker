@@ -231,6 +231,7 @@ const stmtDevConfig = db.prepare<[string, string | null, number | null, number |
 );
 const stmtDevBump = db.prepare<[string]>("UPDATE devices SET config_rev = config_rev + 1 WHERE mac = ?");
 const stmtDevDelete = db.prepare<[string]>("DELETE FROM devices WHERE mac = ?");
+const stmtDevCount = db.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM devices");
 const stmtWifiList = db.prepare<[string], DeviceWifiRow>(
   "SELECT mac, ssid, psk, priority, action FROM device_wifi WHERE mac = ? ORDER BY priority DESC, ssid",
 );
@@ -263,9 +264,25 @@ export function setDeviceToken(mac: string, tokenSha256: string): void {
   stmtDevToken.run(tokenSha256, mac);
 }
 
-/** "Forget": the next check-in from this MAC re-registers with its new token. */
+/**
+ * "Forget": the next check-in from this MAC re-registers with its new token.
+ * Also drops the board's managed WiFi rows (SSIDs + plaintext PSKs) so a
+ * forgotten board's secrets aren't handed to whoever re-registers next —
+ * label/slug/brightness/pollSeconds aren't secret, so those are kept.
+ */
 export function forgetDevice(mac: string): void {
-  stmtDevToken.run(null, mac);
+  db.transaction(() => {
+    stmtDevToken.run(null, mac);
+    stmtWifiDeleteAll.run(mac);
+    stmtDevBump.run(mac);
+  })();
+}
+
+/** Total registered boards, used to cap public self-registration (see routes/device.ts). */
+export function countDevices(): number {
+  const row = stmtDevCount.get();
+  if (!row) throw new Error("countDevices: COUNT query returned no rows");
+  return row.n;
 }
 
 export function recordCheckin(mac: string, c: DeviceCheckin): void {

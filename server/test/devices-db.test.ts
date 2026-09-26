@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   getDevice, registerDevice, recordCheckin, updateDeviceConfig, setDeviceToken,
   forgetDevice, deleteDevice, listDevices, listDeviceWifi, upsertDeviceWifi, deleteDeviceWifi,
+  countDevices,
 } from "../src/db.js";
 
 describe("devices db", () => {
@@ -44,6 +45,24 @@ describe("devices db", () => {
     expect(getDevice("aaaaaaaaaa04")?.tokenSha256).toBeNull();
     setDeviceToken("aaaaaaaaaa04", "e".repeat(64));
     expect(getDevice("aaaaaaaaaa04")?.tokenSha256).toBe("e".repeat(64));
+  });
+
+  it("forget drops managed wifi (secrets) but keeps the non-secret config and bumps rev", () => {
+    registerDevice("aaaaaaaaaa06", "f".repeat(64), 1000);
+    updateDeviceConfig("aaaaaaaaaa06", { label: "den", slug: "shen", brightness: 0.4, pollSeconds: null });
+    upsertDeviceWifi({ mac: "aaaaaaaaaa06", ssid: "Cabin", psk: "pw", priority: 1, action: "upsert" });
+    const revBefore = getDevice("aaaaaaaaaa06")?.configRev ?? 0;
+    forgetDevice("aaaaaaaaaa06");
+    expect(getDevice("aaaaaaaaaa06")?.tokenSha256).toBeNull();
+    expect(listDeviceWifi("aaaaaaaaaa06")).toEqual([]);
+    expect(getDevice("aaaaaaaaaa06")).toMatchObject({ label: "den", slug: "shen", brightness: 0.4 });
+    expect(getDevice("aaaaaaaaaa06")?.configRev).toBe(revBefore + 1);
+  });
+
+  it("counts registered devices", () => {
+    const before = countDevices();
+    registerDevice("aaaaaaaaaa07", "f".repeat(64), 1000);
+    expect(countDevices()).toBe(before + 1);
   });
 
   it("delete removes the board and its wifi rows", () => {
