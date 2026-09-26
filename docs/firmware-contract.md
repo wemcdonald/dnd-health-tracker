@@ -56,7 +56,8 @@ another:
   `Accept-Ranges: bytes`; supports `bytes=START-END` / `bytes=START-` ranges).
 
 **Device flow (identical on both boards):** fetch the manifest; if
-`version > FIRMWARE_VERSION`, stream the image into the inactive slot while
+`version > FIRMWARE_VERSION` (esp32: and not a version that already rolled
+back, see below), stream the image into the inactive slot while
 hashing; verify streamed size + SHA-256 against the manifest; stage + reboot;
 after a healthy first poll, **commit** (else the bootloader rolls back). The
 mechanism differs per board but the policy above does not:
@@ -70,11 +71,27 @@ mechanism differs per board but the policy above does not:
 boot, then hourly. Separately, the *image* is confirmed
 (`mark_app_valid_cancel_rollback`) on the first server answer of any kind —
 a health line or even a 404 unknown-slug counts, since either means the
-network and this image are fine. An unconfirmed image that gets no server
-answer within 180 s reboots itself, and the bootloader rolls back to the
-previous slot. The frozen `boot.py` also resets on an import failure (e.g. a
-broken frozen image), so a broken image rolls back the same way instead of
-dropping to a REPL.
+network and this image are fine. An unconfirmed image that can't reach the
+server resets within about 90 s (the offline reset, which fires first) and
+at most 180 s (probation), and the bootloader rolls back to the previous
+slot. The frozen `boot.py` also resets on an import failure (e.g. a broken
+frozen image), so a broken image rolls back the same way instead of dropping
+to a REPL.
+
+**esp32 rolled-back versions are retried once, then skipped:** after staging
+an update the board adds `"pending": <version>` to `/data/ota.json`. If it
+next boots still running a different version, the update rolled back, and
+the marker becomes `{"failed": <version>, "attempts": <n>}` (`n` counts up
+for the same version and restarts at 1 for a different one; an older
+marker without `attempts` counts as 1). The marker is cleared once the new
+image is confirmed. A version that rolls back twice is skipped until a
+different version is published (any other newer version is offered as
+usual), so a bad image isn't re-downloaded every few minutes. The one retry
+exists because rollback is triggered by "no server answer": a single
+transient outage during probation (a server redeploy longer than 90 s, a
+WiFi drop into the setup-mode idle reset, a portal save before the image was
+confirmed) would otherwise blacklist a good image. A full flash erase clears
+the marker.
 
 **Versioning:** the published manifest `version` MUST equal the `FIRMWARE_VERSION`
 baked into that image (`firmware-c` `FIRMWARE_VERSION`, `firmware-esp32/version.py`).
@@ -150,9 +167,13 @@ go to whoever re-registers next.
 - an invalid field is skipped, but the payload's `rev` is still accepted —
   one bad server value can't cause an endless retry loop
 - WiFi is add/update by SSID (`wifi.upsert`), or an explicit `wifi.remove`;
-  a remove never touches the currently-connected SSID
+  a remove never touches the currently-connected SSID. A remove of the SSID
+  the board is connected to at apply time is ignored and not retried (the
+  rev is still accepted); re-save the remove after the board has moved to
+  another network (which bumps the rev)
 - clamps: `brightness` 0..1, `poll_seconds` 2..300 s; slugs must match
-  `[a-z0-9._-]+`
+  `[a-z0-9._-]{1,64}` (the setup portal applies the same rule after
+  trimming and lower-casing what's typed)
 
 **Never pushable:** `num_leds`, `server_host`/`server_port`, `gpio_pin` — a
 bad value there could lock the board out of its own config channel.
@@ -161,7 +182,15 @@ bad value there could lock the board out of its own config channel.
 first `/<slug>.txt` poll, then every 300 s. A board with WiFi but no slug yet
 checks config before falling back to the setup portal, so a fresh board can
 be assigned a slug from the admin page without ever entering AP mode. It
-does not re-check while in setup mode.
+does not re-check while in setup mode, but a board with saved WiFi whose
+portal has been idle for 180 s reboots, which reconnects and re-checks.
+Idle is measured from the later of setup-mode start and the last portal
+activity (any POST, or a GET of the form page; OS captive-probe redirects
+don't count), so a phone that auto-opens the captive page only delays the
+retry. So a slug
+assigned while the board is in setup mode is picked up within about 3
+minutes, and a board that fell into setup mode during a router outage
+recovers by itself. With no saved WiFi, setup mode waits indefinitely.
 
 **Security:** plain HTTP, so WiFi PSKs travel unencrypted on the LAN. The
 token only stops other clients from fetching a board's config — it is not

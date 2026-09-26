@@ -93,9 +93,15 @@ and then at most every `OTA_CHECK_EVERY_S` (1 h), fetch the manifest; if its
 `set_boot`, and reboot. Separately, the image is **confirmed**
 (`Partition.mark_app_valid_cancel_rollback()`) on the first server answer of
 any kind after boot — a health line or even a 404 unknown-slug counts. An
-image that gets no server answer within `PROBATION_S` (180 s) reboots itself,
-and the bootloader rolls back to the previous slot; a broken frozen image
-(import failure in `boot.py`) rolls back the same way. Partitions
+image that can't reach the server resets within about 90 s (the offline
+reset) and at most `PROBATION_S` (180 s), and the bootloader rolls back to
+the previous slot; a broken frozen image (import failure in `boot.py`) rolls
+back the same way. A version that rolls back is retried once, then skipped
+until a different version is published: `/data/ota.json` gains
+`"pending": N` after staging, and becomes `{"failed": N, "attempts": n}` if
+the board next boots on another version (see `../docs/firmware-contract.md`
+section 2). A full flash erase clears it.
+Partitions
 (`board/HEALTHBAR_C3/partitions.csv`): `ota_0`/`ota_1` at `0x1D0000` (1856
 KiB) each, plus a 320 KiB `vfs` for `/data`, with
 `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` in `sdkconfig.board`.
@@ -136,7 +142,14 @@ must be re-entered via the `healthbar-setup` captive portal afterwards.
 First boot with no WiFi brings up the `healthbar-setup` AP (password
 `dndhealthbar`); connect and the captive portal opens — enter WiFi + the
 character **slug** (and server host if not the default). The bar reboots and
-starts polling.
+starts polling. The slug is trimmed and lower-cased, and must be
+`[a-z0-9._-]{1,64}`; anything else is rejected with a message and nothing is
+saved. Leave the slug blank to have it assigned from the admin page instead.
+
+Setup mode with WiFi already saved (no slug yet, or WiFi was unreachable at
+boot) reboots once the portal has been idle for 180 s (no page load or save),
+to reconnect and pick up a slug assigned from the admin page in the
+meantime. Each page load or save restarts that timer.
 
 ## Publish OTA
 
@@ -167,6 +180,8 @@ cd firmware-esp32
 for t in tests/test_*.py; do python3 "$t"; done
 ```
 
-Host tests cover the pure logic: wire parse (`poll`), OTA manifest parse (`ota`),
-config URL, and the animation engine. **Not** host-testable (needs the board):
+Host tests cover the pure logic: wire parse (`poll`), OTA manifest parse and
+rollback-skip marker (`ota`), setup-mode idle reset (`main`), the portal's
+save handler (`portal`), remote config (`remote_config`, `device`), config
+URL, and the animation engine. **Not** host-testable (needs the board):
 WiFi join, neopixel timing, and OTA partition writes/rollback.
