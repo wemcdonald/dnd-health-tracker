@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 import formbody from "@fastify/formbody";
 import { adminRoutes } from "../src/routes/admin.js";
-import { registerDevice, getDevice, listDeviceWifi, upsertDeviceWifi } from "../src/db.js";
+import { registerDevice, getDevice, listDeviceWifi, upsertDeviceWifi, recordCheckin, recordRejectedCheckin } from "../src/db.js";
 
 async function app() {
   const a = Fastify();
@@ -78,5 +78,91 @@ describe("admin boards", () => {
     const a = await app();
     const r = await form(a, "/admin/devices/dddddddddd02", "label=nope");
     expect(r.statusCode).toBe(404);
+  });
+
+  it("400s a malformed mac on the admin routes", async () => {
+    const a = await app();
+    expect((await form(a, "/admin/devices/not-a-mac", "label=x")).statusCode).toBe(400);
+  });
+
+  it("404s on unknown mac for the forget and delete routes", async () => {
+    const a = await app();
+    expect((await form(a, "/admin/devices/dddddddddd03/forget", "x=1")).statusCode).toBe(404);
+    expect((await form(a, "/admin/devices/dddddddddd04/delete", "x=1")).statusCode).toBe(404);
+  });
+
+  it("keeps the saved psk when a wifi edit's psk is blank, but updates priority", async () => {
+    registerDevice("cccccccccc08", "f".repeat(64), Date.now());
+    const a = await app();
+    await form(a, "/admin/devices/cccccccccc08/wifi", "ssid=Cabin&psk=pw&priority=1&action=upsert");
+    await form(a, "/admin/devices/cccccccccc08/wifi", "ssid=Cabin&psk=&priority=5&action=upsert");
+    expect(listDeviceWifi("cccccccccc08")).toEqual([
+      { mac: "cccccccccc08", ssid: "Cabin", psk: "pw", priority: 5, action: "upsert" },
+    ]);
+  });
+
+  it("clears the saved psk when open=on even though psk is blank", async () => {
+    registerDevice("cccccccccc09", "f".repeat(64), Date.now());
+    const a = await app();
+    await form(a, "/admin/devices/cccccccccc09/wifi", "ssid=Cabin&psk=pw&priority=1&action=upsert");
+    await form(a, "/admin/devices/cccccccccc09/wifi", "ssid=Cabin&psk=&priority=1&action=upsert&open=on");
+    expect(listDeviceWifi("cccccccccc09")).toEqual([
+      { mac: "cccccccccc09", ssid: "Cabin", psk: "", priority: 1, action: "upsert" },
+    ]);
+  });
+
+  it("a brand-new row with a blank psk and no open flag just stores an empty psk", async () => {
+    registerDevice("cccccccccc10", "f".repeat(64), Date.now());
+    const a = await app();
+    await form(a, "/admin/devices/cccccccccc10/wifi", "ssid=Cabin&psk=&priority=0&action=upsert");
+    expect(listDeviceWifi("cccccccccc10")).toEqual([
+      { mac: "cccccccccc10", ssid: "Cabin", psk: "", priority: 0, action: "upsert" },
+    ]);
+  });
+
+  it("drops the saved psk once a network is marked for removal", async () => {
+    registerDevice("cccccccccc11", "f".repeat(64), Date.now());
+    const a = await app();
+    await form(a, "/admin/devices/cccccccccc11/wifi", "ssid=Cabin&psk=pw&priority=1&action=upsert");
+    await form(a, "/admin/devices/cccccccccc11/wifi", "ssid=Cabin&action=remove");
+    expect(listDeviceWifi("cccccccccc11")).toEqual([
+      { mac: "cccccccccc11", ssid: "Cabin", psk: "", priority: 0, action: "remove" },
+    ]);
+  });
+
+  it("rejects an ssid over 32 bytes, counting multibyte characters as multiple bytes", async () => {
+    registerDevice("cccccccccc12", "f".repeat(64), Date.now());
+    const a = await app();
+    const ssid = encodeURIComponent("é".repeat(17)); // 17 chars, 2 bytes each = 34 bytes > 32
+    const r = await form(a, "/admin/devices/cccccccccc12/wifi", `ssid=${ssid}&action=upsert`);
+    expect(r.statusCode).toBe(400);
+  });
+
+  it("rejects a priority outside -100..100", async () => {
+    registerDevice("cccccccccc13", "f".repeat(64), Date.now());
+    const a = await app();
+    expect(
+      (await form(a, "/admin/devices/cccccccccc13/wifi", "ssid=Cabin&priority=101&action=upsert")).statusCode,
+    ).toBe(400);
+    expect(
+      (await form(a, "/admin/devices/cccccccccc13/wifi", "ssid=Cabin&priority=-101&action=upsert")).statusCode,
+    ).toBe(400);
+  });
+
+  it("escapes a hostile reported slug", async () => {
+    registerDevice("cccccccccc14", "f".repeat(64), Date.now());
+    recordCheckin("cccccccccc14", {
+      now: Date.now(), fwVersion: "1", reportedSlug: "<script>alert(1)</script>", localIp: "1.2.3.4",
+    });
+    const r = await (await app()).inject({ method: "GET", url: "/" });
+    expect(r.body).not.toContain("<script>alert(1)</script>");
+    expect(r.body).toContain("&lt;script&gt;");
+  });
+
+  it("shows a rejected-check-in warning when it's newer than last seen", async () => {
+    registerDevice("cccccccccc15", "f".repeat(64), 1000);
+    recordRejectedCheckin("cccccccccc15", 2000);
+    const r = await (await app()).inject({ method: "GET", url: "/" });
+    expect(r.body).toContain("rejected check-in");
   });
 });

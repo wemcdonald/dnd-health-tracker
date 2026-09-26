@@ -6,15 +6,24 @@
  *     X-Config-Rev: <int>        last rev the board applied
  *     X-Firmware-Version, X-Slug, X-Local-IP   reported state, shown in the admin page
  *
- *   -> 400 malformed mac/token, 403 token mismatch, 429 device cap reached
- *      (new registrations only), 304 board is current, 200 JSON ConfigPayload
- *      otherwise (including when X-Config-Rev is missing).
+ *   -> 400 malformed mac/token, 403 token mismatch (also records last_rejected,
+ *      surfaced on the admin page), 429 device cap reached (new registrations
+ *      only), 304 board is current, 200 JSON ConfigPayload otherwise
+ *      (including when X-Config-Rev is missing or not a bare integer).
  *
  * Contract: docs/firmware-contract.md section 4.
  */
 
 import type { FastifyInstance, FastifyPluginOptions, FastifyRequest } from "fastify";
-import { getDevice, registerDevice, setDeviceToken, recordCheckin, listDeviceWifi, countDevices } from "../db.js";
+import {
+  getDevice,
+  registerDevice,
+  setDeviceToken,
+  recordCheckin,
+  recordRejectedCheckin,
+  listDeviceWifi,
+  countDevices,
+} from "../db.js";
 import { MAC_RE, TOKEN_RE, hashToken, tokenMatches, buildConfigPayload } from "../devices.js";
 
 /**
@@ -53,6 +62,7 @@ export async function deviceRoutes(app: FastifyInstance, opts: Opts = {}): Promi
     } else if (existing.tokenSha256 === null) {
       setDeviceToken(mac, hashToken(token)); // re-register after "forget"; not a new row
     } else if (!tokenMatches(token, existing.tokenSha256)) {
+      recordRejectedCheckin(mac, now);
       return reply.code(403).type("text/plain").send("token mismatch\n");
     }
 
@@ -68,9 +78,10 @@ export async function deviceRoutes(app: FastifyInstance, opts: Opts = {}): Promi
 
     const dev = getDevice(mac);
     if (!dev) return reply.code(500).type("text/plain").send("device vanished\n");
+    // Only a header matching \d+ counts as a rev; anything else (missing, "", non-numeric) is absent -> no 304.
     const revHeader = header(req, "x-config-rev");
-    const clientRev = revHeader === undefined ? NaN : Number(revHeader);
-    if (Number.isInteger(clientRev) && clientRev === dev.configRev) {
+    const clientRev = revHeader !== undefined && /^\d+$/.test(revHeader) ? Number(revHeader) : undefined;
+    if (clientRev !== undefined && clientRev === dev.configRev) {
       return reply.code(304).send();
     }
     return reply

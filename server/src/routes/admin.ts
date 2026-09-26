@@ -92,11 +92,17 @@ function boardsSection(knownSlugs: ReadonlySet<string>): string {
         <td><form method="POST" action="${base}/wifi/delete" style="display:inline">${keyField}
           <input type="hidden" name="ssid" value="${esc(w.ssid)}"><button>drop</button></form></td>
       </tr>`).join("\n");
+    const rejectedWarn =
+      d.lastRejected !== null && d.lastRejected > d.lastSeen
+        ? `<p><small class="err">rejected check-in ${esc(ago(d.lastRejected))} — board was probably re-flashed ` +
+          `(new token); click &quot;forget token&quot; so it can re-register</small></p>`
+        : "";
     return `<fieldset>
 <legend><code>${esc(formatMac(d.mac))}</code> ${esc(d.label)}</legend>
 <p><small>last seen ${esc(ago(d.lastSeen))} · fw v${esc(d.fwVersion || "?")} · LAN ${esc(d.localIp || "?")}
  · showing <code>${esc(d.reportedSlug || "—")}</code>${slugWarn} · rev ${d.configRev}
  ${d.tokenSha256 === null ? " · <b>forgotten: re-registers on next check-in (managed WiFi cleared)</b>" : ""}</small></p>
+${rejectedWarn}
 <form method="POST" action="${base}">${keyField}
   <label>label <input type="text" name="label" value="${esc(d.label)}"></label>
   <label>slug (blank = not managed) <input type="text" name="slug" value="${esc(d.slug ?? "")}" list="slugs"></label>
@@ -108,8 +114,9 @@ function boardsSection(knownSlugs: ReadonlySet<string>): string {
 ${wifiRows || '<tr><td colspan="4"><em>no managed networks</em></td></tr>'}</table>
 <form method="POST" action="${base}/wifi">${keyField}
   <label>ssid <input type="text" name="ssid" required></label>
-  <label>password (not shown again) <input type="text" name="psk"></label>
-  <label>priority <input type="text" name="priority" value="0"></label>
+  <label>password (leave blank to keep the saved password) <input type="password" name="psk"></label>
+  <label><input type="checkbox" name="open"> open network (no password)</label>
+  <label>priority -100–100 <input type="text" name="priority" value="0"></label>
   <label>action <select name="action"><option value="upsert">add/update</option><option value="remove">remove from board</option></select></label>
   <button type="submit">save network</button>
 </form>
@@ -120,7 +127,8 @@ ${wifiRows || '<tr><td colspan="4"><em>no managed networks</em></td></tr>'}</tab
   const options = [...knownSlugs].map((s) => `<option value="${esc(s)}">`).join("");
   return `<h2>Boards</h2>
 <p><small>Boards register themselves on first check-in (<code>/device/&lt;mac&gt;/config</code>) and pick up changes within ~5 min.
-WiFi rows are add/update or remove; dropping a row just stops managing it.</small></p>
+WiFi rows are add/update or remove; dropping a row just stops managing it. If a board was re-flashed with a new
+token, its check-ins get rejected until you click "forget token" on that card.</small></p>
 <datalist id="slugs">${options}</datalist>
 ${cards || "<p><em>no boards have checked in yet</em></p>"}`;
 }
@@ -301,11 +309,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const b = req.body ?? {};
     const ssid = (b["ssid"] ?? "").trim();
     const action = b["action"] === "remove" ? "remove" : "upsert";
+    const open = b["open"] === "on";
     const priority = Number((b["priority"] ?? "0").trim() || "0");
-    if (!ssid || ssid.length > 32 || !Number.isInteger(priority)) {
-      return reply.code(400).type("text/plain").send("need a valid ssid (<=32 chars) and integer priority\n");
+    if (
+      !ssid ||
+      Buffer.byteLength(ssid, "utf8") > 32 ||
+      !Number.isInteger(priority) ||
+      priority < -100 ||
+      priority > 100
+    ) {
+      return reply.code(400).type("text/plain").send("need a valid ssid (<=32 bytes) and integer priority -100..100\n");
     }
-    upsertDeviceWifi({ mac, ssid, psk: action === "upsert" ? b["psk"] ?? "" : "", priority, action });
+    upsertDeviceWifi({ mac, ssid, psk: action === "upsert" ? b["psk"] ?? "" : "", priority, action }, { open });
     return reply.redirect("/");
   });
 

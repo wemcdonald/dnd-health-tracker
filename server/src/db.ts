@@ -5,7 +5,7 @@
  *   characters(slug, character_id, user_id, game_id, enabled)
  *   settings(key, value)   — currently just the Cobalt cookie
  *   devices(mac, token_sha256, label, slug, brightness, poll_seconds, config_rev,
- *           first_seen, last_seen, fw_version, reported_slug, local_ip)
+ *           first_seen, last_seen, fw_version, reported_slug, local_ip, last_rejected)
  *   device_wifi(mac, ssid, psk, priority, action)   — per-board pushed WiFi list
  *
  * The DB file lives at $DB_PATH (default ./data/tracker.db) so it can sit on a
@@ -55,7 +55,8 @@ db.exec(`
     last_seen     INTEGER NOT NULL,
     fw_version    TEXT NOT NULL DEFAULT '',
     reported_slug TEXT NOT NULL DEFAULT '',
-    local_ip      TEXT NOT NULL DEFAULT ''
+    local_ip      TEXT NOT NULL DEFAULT '',
+    last_rejected INTEGER
   );
   CREATE TABLE IF NOT EXISTS device_wifi (
     mac      TEXT NOT NULL,
@@ -146,6 +147,7 @@ export interface Device {
   fwVersion: string;
   reportedSlug: string;
   localIp: string;
+  lastRejected: number | null; // last token-mismatch (403) check-in; probably a re-flashed board
 }
 
 export interface DeviceWifi {
@@ -183,6 +185,7 @@ interface DeviceRow {
   fw_version: string;
   reported_slug: string;
   local_ip: string;
+  last_rejected: number | null;
 }
 
 interface DeviceWifiRow {
@@ -207,6 +210,7 @@ function rowToDevice(r: DeviceRow): Device {
     fwVersion: r.fw_version,
     reportedSlug: r.reported_slug,
     localIp: r.local_ip,
+    lastRejected: r.last_rejected,
   };
 }
 
@@ -226,6 +230,7 @@ const stmtDevToken = db.prepare<[string | null, string]>("UPDATE devices SET tok
 const stmtDevCheckin = db.prepare<[number, string, string, string, string]>(
   "UPDATE devices SET last_seen = ?, fw_version = ?, reported_slug = ?, local_ip = ? WHERE mac = ?",
 );
+const stmtDevRejected = db.prepare<[number, string]>("UPDATE devices SET last_rejected = ? WHERE mac = ?");
 const stmtDevConfig = db.prepare<[string, string | null, number | null, number | null, string]>(
   "UPDATE devices SET label = ?, slug = ?, brightness = ?, poll_seconds = ?, config_rev = config_rev + 1 WHERE mac = ?",
 );
@@ -235,10 +240,23 @@ const stmtDevCount = db.prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM de
 const stmtWifiList = db.prepare<[string], DeviceWifiRow>(
   "SELECT mac, ssid, psk, priority, action FROM device_wifi WHERE mac = ? ORDER BY priority DESC, ssid",
 );
-const stmtWifiUpsert = db.prepare<[string, string, string, number, string]>(`
-  INSERT INTO device_wifi (mac, ssid, psk, priority, action) VALUES (?, ?, ?, ?, ?)
+const stmtWifiUpsert = db.prepare<{
+  mac: string;
+  ssid: string;
+  psk: string;
+  priority: number;
+  action: string;
+  open: number;
+}>(`
+  INSERT INTO device_wifi (mac, ssid, psk, priority, action) VALUES (@mac, @ssid, @psk, @priority, @action)
   ON CONFLICT(mac, ssid) DO UPDATE SET
-    psk = excluded.psk, priority = excluded.priority, action = excluded.action
+    psk = CASE
+      WHEN excluded.action = 'remove' THEN ''
+      WHEN excluded.psk = '' AND @open = 0 THEN device_wifi.psk
+      ELSE excluded.psk
+    END,
+    priority = excluded.priority,
+    action = excluded.action
 `);
 const stmtWifiDelete = db.prepare<[string, string]>("DELETE FROM device_wifi WHERE mac = ? AND ssid = ?");
 const stmtWifiDeleteAll = db.prepare<[string]>("DELETE FROM device_wifi WHERE mac = ?");
@@ -289,6 +307,11 @@ export function recordCheckin(mac: string, c: DeviceCheckin): void {
   stmtDevCheckin.run(c.now, c.fwVersion, c.reportedSlug, c.localIp, mac);
 }
 
+/** Record a token-mismatch (403) check-in, so the admin page can flag a probably re-flashed board. */
+export function recordRejectedCheckin(mac: string, now: number): void {
+  stmtDevRejected.run(now, mac);
+}
+
 export function updateDeviceConfig(mac: string, e: DeviceConfigEdit): void {
   stmtDevConfig.run(e.label, e.slug, e.brightness, e.pollSeconds, mac);
 }
@@ -297,9 +320,16 @@ export function listDeviceWifi(mac: string): DeviceWifi[] {
   return stmtWifiList.all(mac).map(rowToWifi);
 }
 
-export function upsertDeviceWifi(w: DeviceWifi): void {
+/**
+ * Upsert a managed WiFi row. A blank `psk` on an existing row is treated as
+ * "leave the saved password alone" (so re-saving priority doesn't wipe it) —
+ * pass `{ open: true }` to explicitly store an empty password (open network).
+ * Marking a row for removal always drops the stored password.
+ */
+export function upsertDeviceWifi(w: DeviceWifi, opts: { open?: boolean } = {}): void {
+  const open = opts.open ?? false;
   db.transaction(() => {
-    stmtWifiUpsert.run(w.mac, w.ssid, w.psk, w.priority, w.action);
+    stmtWifiUpsert.run({ mac: w.mac, ssid: w.ssid, psk: w.psk, priority: w.priority, action: w.action, open: open ? 1 : 0 });
     stmtDevBump.run(w.mac);
   })();
 }

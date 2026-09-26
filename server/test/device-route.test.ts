@@ -48,6 +48,14 @@ describe("GET /device/:mac/config", () => {
     expect((await get(a, "bbbbbbbbbb03", hdrs(0, "b".repeat(32)))).statusCode).toBe(403);
   });
 
+  it("records lastRejected on a 403 token mismatch", async () => {
+    const a = await app();
+    await get(a, "bbbbbbbbbb10", hdrs(0));
+    expect(getDevice("bbbbbbbbbb10")?.lastRejected).toBeNull();
+    await get(a, "bbbbbbbbbb10", hdrs(0, "b".repeat(32)));
+    expect(getDevice("bbbbbbbbbb10")?.lastRejected).toEqual(expect.any(Number));
+  });
+
   it("returns the payload when the board's rev is behind, 304 once caught up", async () => {
     const a = await app();
     await get(a, "bbbbbbbbbb04", hdrs(0));
@@ -92,6 +100,13 @@ describe("GET /device/:mac/config", () => {
   it("sends the payload (no 304) when X-Config-Rev is missing entirely", async () => {
     const a = await app();
     const r = await get(a, "bbbbbbbbbb08", hdrsNoRev());
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ rev: 0 });
+  });
+
+  it("treats an empty X-Config-Rev as absent (no 304)", async () => {
+    const a = await app();
+    const r = await get(a, "bbbbbbbbbb11", { ...hdrs(0), "x-config-rev": "" });
     expect(r.statusCode).toBe(200);
     expect(r.json()).toMatchObject({ rev: 0 });
   });
