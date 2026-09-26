@@ -114,12 +114,12 @@ class NetManager:
         except Exception:
             pass
         ap = network.WLAN(network.AP_IF)
+        ap.active(True)  # ESP32 rejects config() on an inactive AP ("Wifi Invalid Mode")
         try:
             ap.config(essid=AP_SSID, password=AP_PASSWORD,
                       security=network.AUTH_WPA_WPA2_PSK)
         except (ValueError, AttributeError, OSError):
             ap.config(essid=AP_SSID, password=AP_PASSWORD)  # port-dependent kwargs
-        ap.active(True)
         self._ap = ap
         return AP_IP
 
