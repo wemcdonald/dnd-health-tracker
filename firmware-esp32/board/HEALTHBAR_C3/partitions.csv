@@ -1,0 +1,10 @@
+# HEALTHBAR_C3: dual-OTA layout for 4 MiB XIAO ESP32-C3.
+# ota_0/ota_1 = 0x1D0000 (1856 KiB) each; vfs (/data etc.) = 320 KiB.
+# publish-fw.mjs esp32 max and justfile esp32_slot MUST equal 0x1D0000 (1900544).
+# Name,   Type, SubType, Offset,   Size,
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x10000,  0x1D0000,
+ota_1,    app,  ota_1,   0x1E0000, 0x1D0000,
+vfs,      data, fat,     0x3B0000, 0x50000,
