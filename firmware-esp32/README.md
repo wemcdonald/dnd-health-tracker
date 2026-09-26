@@ -28,12 +28,15 @@ cold-load hang), `neopixel` over RMT, and built-in dual-app OTA with rollback.
 | `main.py` | supervisor: connect → poll loop → sleep → OTA; render thread; recovery |
 | `poll.py` | plain-HTTP GET of `/<slug>.txt` + 4-int wire parser |
 | `ota.py` | manifest parse + stream image into next OTA partition + rollback |
+| `device.py` | board identity: MAC id + self-generated token (`/data/device.json`) |
+| `remote_config.py` | fetches + merges server-pushed config (slug/brightness/poll_seconds/WiFi) |
 | `wifi.py` | `network.WLAN` STA/AP manager |
 | `portal.py` | captive portal + config form (WiFi + server/slug) |
 | `config.py` | JSON config/theme/wifi in flash |
 | `anim.py`, `colors.py`, `leds.py` | LED animation engine + WS2812/sim backends (reused) |
 | `version.py` | `FIRMWARE_VERSION` (compared against the OTA manifest) |
 | `data/config.json` | default device config |
+| `board/HEALTHBAR_C3/` | custom MicroPython board: dual-OTA partitions, sdkconfig, frozen-manifest hookup |
 | `tests/` | CPython host tests (`python3 tests/test_*.py`) |
 
 ## Pins & wiring
@@ -83,43 +86,79 @@ Consumes the server's existing endpoints (plain HTTP, no auth):
 `GET /firmware/latest` (manifest `"<version> <size>\n<sha256>\n<imagePath>"`) and
 `GET /firmware/image.bin`.
 
-Flow (`ota.py`): while online, at most every `OTA_CHECK_EVERY_S` (1 h), fetch the
-manifest; if its `version` > `version.FIRMWARE_VERSION`, stream `image.bin`
-straight into the *next* OTA partition (never buffered whole), verify size +
-SHA-256, `set_boot`, and reboot. The first good poll after boot calls
-`Partition.mark_app_valid_cancel_rollback()`, so an image that can't connect/poll
-**rolls back** on the next reset.
+Flow (`ota.py` + `main.py`): while online, on the first good poll after boot
+and then at most every `OTA_CHECK_EVERY_S` (1 h), fetch the manifest; if its
+`version` > `version.FIRMWARE_VERSION`, stream `image.bin` straight into the
+*next* OTA partition (never buffered whole), verify size + SHA-256,
+`set_boot`, and reboot. Separately, the image is **confirmed**
+(`Partition.mark_app_valid_cancel_rollback()`) on the first server answer of
+any kind after boot — a health line or even a 404 unknown-slug counts. An
+image that gets no server answer within `PROBATION_S` (180 s) reboots itself,
+and the bootloader rolls back to the previous slot; a broken frozen image
+(import failure in `boot.py`) rolls back the same way. Partitions
+(`board/HEALTHBAR_C3/partitions.csv`): `ota_0`/`ota_1` at `0x1D0000` (1856
+KiB) each, plus a 320 KiB `vfs` for `/data`, with
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` in `sdkconfig.board`.
 
-**Build requirements for OTA:**
-- Flash a MicroPython build with the standard **dual OTA app partition table**
-  (ota_0 / ota_1 + otadata), not a single-app layout.
-- Enable rollback in the build (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`) for
-  the auto-revert to work.
-- The published `image.bin` is a full MicroPython **application image** with this
-  firmware frozen in (or the app copied to the filesystem, depending on how you
-  package). Bump `version.py` and the manifest `version` in lockstep on each
-  publish. Publish via the existing `server/tools/publish-fw.mjs` into the
-  server's `/firmware` dir.
+## Toolchain setup
 
-## Flashing (first time)
+- **ESP-IDF v5.5.2** at `~/esp/esp-idf` — `./install.sh esp32c3`, then
+  `source ~/esp/esp-idf/export.sh` in every shell you build from. If that
+  sourcing throws Python errors, an asdf free-threaded `python3` shim breaks
+  the IDF env — strip `~/.asdf/shims` from `PATH` first.
+- **MicroPython v1.29.0** checked out at `../micropython` (or set
+  `MICROPYTHON_DIR`) — build `mpy-cross` and fetch the port's submodules
+  (`make ... submodules`) once before the first `just build esp32`.
+
+## Build
 
 ```sh
-# 1. Erase + flash MicroPython for ESP32-C3 (dual-OTA build; see OTA above)
-esptool.py --chip esp32c3 erase_flash
-esptool.py --chip esp32c3 write_flash -z 0x0 ESP32_GENERIC_C3-OTA.bin
-
-# 2. Copy the app + config (mpremote)
-cd firmware-esp32
-mpremote fs mkdir :/data 2>/dev/null || true
-mpremote fs cp data/config.json :/data/config.json
-for f in *.py; do mpremote fs cp "$f" ":/$f"; done
-mpremote reset
+just build esp32 <version>      # <version> must be an integer
 ```
+
+Drives `idf.py` plus `makeimg.py` directly rather than `make BUILD=...`: a
+`BUILD=` on the make command line leaks (via `MAKEFLAGS`) into the mpy-cross
+sub-make and corrupts its generated headers. The build enforces >= 128 KiB
+free in the 1856 KiB OTA slot. After editing `sdkconfig.board` or
+`partitions.csv`, `rm -rf firmware-esp32/build/idf` first — ESP-IDF only
+fills in `SDKCONFIG_DEFAULTS` keys missing from an existing
+`build/idf/sdkconfig`; it never overwrites ones already set there.
+
+## First flash
+
+```sh
+ESP32_PORT=/dev/cu.usbmodemXXXX just flash-full esp32
+```
+
+**Erases the whole board, including `/data`** — WiFi and the character slug
+must be re-entered via the `healthbar-setup` captive portal afterwards.
 
 First boot with no WiFi brings up the `healthbar-setup` AP (password
 `dndhealthbar`); connect and the captive portal opens — enter WiFi + the
 character **slug** (and server host if not the default). The bar reboots and
 starts polling.
+
+## Publish OTA
+
+```sh
+just publish esp32 <version>
+```
+
+Builds the image, stamps the version, and writes the manifest into
+`server/firmware/esp32/` via the same `publish-fw.mjs` tool the Pico uses.
+
+## Dev flow
+
+`just flash esp32` (mpremote copy) is for a **stock MicroPython** build only:
+on the OTA (frozen) build, `boot.py` puts the frozen app ahead of filesystem
+copies, so files copied this way are ignored. mpremote needs `resume` in the
+session, because `boot.py` runs the app and never returns.
+
+## Remote config
+
+The board also checks in with the server for pushed config (slug,
+brightness, poll_seconds, WiFi) — see `../docs/firmware-contract.md` section
+4 and `remote_config.py` / `device.py`.
 
 ## Tests
 
