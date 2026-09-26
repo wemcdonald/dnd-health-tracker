@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hashToken, tokenMatches, formatMac, buildConfigPayload, MAC_RE, TOKEN_RE } from "../src/devices.js";
+import { hashToken, tokenMatches, formatMac, buildConfigPayload, MAC_RE, TOKEN_RE, SLUG_RE } from "../src/devices.js";
 import type { Device, DeviceWifi } from "../src/db.js";
 
 const dev: Device = {
@@ -13,6 +13,14 @@ describe("devices helpers", () => {
     expect(MAC_RE.test("ac:27:6e:7d:17:74")).toBe(false);
     expect(TOKEN_RE.test("a".repeat(32))).toBe(true);
     expect(TOKEN_RE.test("A".repeat(32))).toBe(false);
+  });
+
+  it("caps slugs at 64 chars (matches the firmware's limit)", () => {
+    expect(SLUG_RE.test("thorin")).toBe(true);
+    expect(SLUG_RE.test("a".repeat(64))).toBe(true);
+    expect(SLUG_RE.test("a".repeat(65))).toBe(false);
+    expect(SLUG_RE.test("")).toBe(false);
+    expect(SLUG_RE.test("Bad Slug")).toBe(false);
   });
 
   it("hashes tokens and compares against the stored hash", () => {

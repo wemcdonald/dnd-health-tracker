@@ -3,16 +3,22 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      # Host 80 -> container 8080. The Pico does PLAIN HTTP only, so whatever
-      # fronts dndhealth.willflix.org must serve /*.txt over http:// without a
-      # forced HTTPS redirect. (Admin UI may be HTTPS-only behind a proxy.)
+      # Host 80 -> container 8080. The boards do PLAIN HTTP only, so whatever
+      # fronts dndhealth.willflix.org must serve /*.txt, /firmware/**, and
+      # /device/** (the board config channel) over http:// without a forced
+      # HTTPS redirect. (Admin UI may be HTTPS-only behind a proxy.) The
+      # Traefik router rule in /willflix/docker/compose.yml must route all
+      # three prefixes to this plain-HTTP router, not behind Authentik.
       - "80:8080"
     environment:
       - PORT=8080
       - DB_PATH=/data/tracker.db
       # OTA firmware images are served from here. Bind-mounted (below) from the
-      # host's ./firmware dir so an scp/publish into that dir goes live without a
-      # rebuild. The dir is gitignored, so `git pull` never clobbers it.
+      # host's ./firmware dir. server/.gitignore un-ignores just image.bin and
+      # manifest.txt per board, so those two files ARE tracked in git (git
+      # history is the firmware changelog) -- publishing is: `just publish`,
+      # commit + push the two files, then `git pull` on willflix. No rebuild
+      # or restart needed: the server reads them straight off disk per request.
       - FIRMWARE_DIR=/firmware
       # Optional light guard for the admin UI (cobalt cookie is sensitive):
       # - ADMIN_PASSWORD=change-me

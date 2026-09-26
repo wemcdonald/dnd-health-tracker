@@ -10,8 +10,8 @@ import type { Device, DeviceWifi } from "./db.js";
 export const MAC_RE = /^[0-9a-f]{12}$/;
 /** Board-generated token: 16 random bytes as 32 lowercase hex. */
 export const TOKEN_RE = /^[0-9a-f]{32}$/;
-/** Same rule the firmware and the character form use. */
-export const SLUG_RE = /^[a-z0-9._-]+$/;
+/** Same rule the firmware and the character form use; firmware rejects slugs over 64 chars. */
+export const SLUG_RE = /^[a-z0-9._-]{1,64}$/;
 
 export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");

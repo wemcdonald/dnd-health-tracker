@@ -39,6 +39,14 @@ describe("admin boards", () => {
     expect(getDevice("cccccccccc03")?.configRev).toBe(0);
   });
 
+  it("rejects a slug over 64 chars (same cap the firmware enforces)", async () => {
+    registerDevice("cccccccccc16", "f".repeat(64), Date.now());
+    const a = await app();
+    expect((await form(a, "/admin/devices/cccccccccc16", `slug=${"a".repeat(65)}`)).statusCode).toBe(400);
+    expect((await form(a, "/admin/devices/cccccccccc16", `slug=${"a".repeat(64)}`)).statusCode).toBe(302);
+    expect(getDevice("cccccccccc16")?.slug).toBe("a".repeat(64));
+  });
+
   it("adds and deletes wifi rows", async () => {
     registerDevice("cccccccccc04", "f".repeat(64), Date.now());
     const a = await app();
@@ -111,13 +119,31 @@ describe("admin boards", () => {
     ]);
   });
 
-  it("a brand-new row with a blank psk and no open flag just stores an empty psk", async () => {
+  it("rejects a brand-new network with a blank psk and no open flag", async () => {
     registerDevice("cccccccccc10", "f".repeat(64), Date.now());
     const a = await app();
-    await form(a, "/admin/devices/cccccccccc10/wifi", "ssid=Cabin&psk=&priority=0&action=upsert");
-    expect(listDeviceWifi("cccccccccc10")).toEqual([
-      { mac: "cccccccccc10", ssid: "Cabin", psk: "", priority: 0, action: "upsert" },
+    const r = await form(a, "/admin/devices/cccccccccc10/wifi", "ssid=Cabin&psk=&priority=0&action=upsert");
+    expect(r.statusCode).toBe(400);
+    expect(r.body).toContain("new network needs a password");
+    expect(listDeviceWifi("cccccccccc10")).toEqual([]);
+  });
+
+  it("accepts a brand-new open network with a blank psk when open is ticked", async () => {
+    registerDevice("cccccccccc17", "f".repeat(64), Date.now());
+    const a = await app();
+    const r = await form(a, "/admin/devices/cccccccccc17/wifi", "ssid=Cabin&psk=&priority=0&action=upsert&open=on");
+    expect(r.statusCode).toBe(302);
+    expect(listDeviceWifi("cccccccccc17")).toEqual([
+      { mac: "cccccccccc17", ssid: "Cabin", psk: "", priority: 0, action: "upsert" },
     ]);
+  });
+
+  it("marking a not-yet-managed ssid for removal doesn't require a password", async () => {
+    registerDevice("cccccccccc18", "f".repeat(64), Date.now());
+    const a = await app();
+    const r = await form(a, "/admin/devices/cccccccccc18/wifi", "ssid=Old&action=remove");
+    expect(r.statusCode).toBe(302);
+    expect(listDeviceWifi("cccccccccc18").map((w) => [w.ssid, w.action])).toEqual([["Old", "remove"]]);
   });
 
   it("drops the saved psk once a network is marked for removal", async () => {

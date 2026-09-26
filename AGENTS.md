@@ -82,6 +82,24 @@ switch on OUT). ESP32 LED data = **pad D1 / GPIO3** (`gpio_pin: 3`).
 ## Server / deploy
 
 Runs as the `dnd-health` container in the willflix compose (`/willflix/docker/
-compose.yml`), behind Traefik: admin UI is HTTPS + Authentik; `*.txt` device feed
-and `/firmware/**` are plain HTTP, no auth (the device has no TLS). Firmware
-images are bind-mounted from `server/firmware/<board>/`.
+compose.yml`), behind Traefik: admin UI is HTTPS + Authentik; `*.txt` device feed,
+`/firmware/**`, and `/device/**` (the board config channel — see
+[`server/src/routes/device.ts`](server/src/routes/device.ts)) are plain HTTP, no
+auth (the device has no TLS). The Traefik router rule in `/willflix/docker/
+compose.yml` must include `PathPrefix(`/device/`)` on that same plain-HTTP
+router, not behind Authentik — without it the board can never register (its
+check-ins never reach the app) and it silently never shows up in the admin UI.
+
+**How an OTA image reaches a device:** `just publish <board> <version>` runs
+`server/tools/publish-fw.mjs`, which writes `server/firmware/<board>/{image.bin,
+manifest.txt}`. Despite `server/.gitignore` ignoring `firmware/*` generally, it
+explicitly un-ignores `firmware/*/image.bin` and `firmware/*/manifest.txt` — so
+these two files per board **are tracked in git** (verified: `firmware/pico/
+image.bin` and `manifest.txt` are both committed, two commits deep). That's
+deliberate: git history is the firmware changelog, and it's also the deploy
+transport. The willflix container bind-mounts `server/firmware` (see `volumes:`
+in `server/docker-compose.yml`) and `server/src/routes/firmware.ts` reads the
+files straight off disk on every request (no caching), so deploying a published
+image is: commit + push the two files from your `just publish` run, then `git
+pull` on willflix — no rebuild or restart needed, the next `/firmware/<board>/
+latest` or `image.bin` request serves the new bytes immediately.

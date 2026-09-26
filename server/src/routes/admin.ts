@@ -128,7 +128,8 @@ ${wifiRows || '<tr><td colspan="4"><em>no managed networks</em></td></tr>'}</tab
   return `<h2>Boards</h2>
 <p><small>Boards register themselves on first check-in (<code>/device/&lt;mac&gt;/config</code>) and pick up changes within ~5 min.
 WiFi rows are add/update or remove; dropping a row just stops managing it. If a board was re-flashed with a new
-token, its check-ins get rejected until you click "forget token" on that card.</small></p>
+token, its check-ins get rejected until you click "forget token" on that card.
+A remove is ignored for the network the board is on at that moment; re-save it after the board has moved (that bumps the rev).</small></p>
 <datalist id="slugs">${options}</datalist>
 ${cards || "<p><em>no boards have checked in yet</em></p>"}`;
 }
@@ -230,8 +231,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     const b = req.body ?? {};
     const slug = (b["slug"] ?? "").trim().toLowerCase();
     const characterId = parseCharacterId(b["characterRef"] ?? "");
-    if (!slug || !/^[a-z0-9._-]+$/.test(slug)) {
-      return reply.code(400).type("text/plain").send("invalid slug (use a-z 0-9 . _ -)\n");
+    if (!SLUG_RE.test(slug)) {
+      return reply.code(400).type("text/plain").send("invalid slug (use a-z 0-9 . _ - , max 64 chars)\n");
     }
     if (!characterId) {
       return reply.code(400).type("text/plain").send("could not parse a character id from input\n");
@@ -320,7 +321,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     ) {
       return reply.code(400).type("text/plain").send("need a valid ssid (<=32 bytes) and integer priority -100..100\n");
     }
-    upsertDeviceWifi({ mac, ssid, psk: action === "upsert" ? b["psk"] ?? "" : "", priority, action }, { open });
+    const psk = action === "upsert" ? b["psk"] ?? "" : "";
+    const alreadyManaged = listDeviceWifi(mac).some((w) => w.ssid === ssid);
+    if (action === "upsert" && !alreadyManaged && psk === "" && !open) {
+      return reply.code(400).type("text/plain").send("new network needs a password (or tick 'open network')\n");
+    }
+    upsertDeviceWifi({ mac, ssid, psk, priority, action }, { open });
     return reply.redirect("/");
   });
 
