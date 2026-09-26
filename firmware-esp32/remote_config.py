@@ -8,7 +8,10 @@ Merge rules (see ../docs/firmware-contract.md section 4):
   - an absent or null field means "not managed from the server": keep local value
   - an invalid field is skipped, but the payload rev is still accepted, so one
     typo on the server can't cause an endless retry loop
-  - WiFi is add/update only; a remove never touches the connected SSID
+  - WiFi is add/update only; a remove never touches the connected SSID. A
+    remove of the SSID the board is connected to at apply time is ignored and
+    not retried (the rev is still accepted); re-save it after the board has
+    moved to another network, which bumps the rev.
 
 apply() is pure and host-tested; check() fetches, applies and persists.
 """
@@ -18,7 +21,6 @@ import json
 import config
 import device
 
-SLUG_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789._-"
 CHECK_EVERY_S = 300
 
 
@@ -29,10 +31,6 @@ class Result:
         self.rev = rev
         self.dev_changed = dev_changed
         self.wifi_changed = wifi_changed
-
-
-def _valid_slug(s):
-    return isinstance(s, str) and 0 < len(s) <= 64 and all(c in SLUG_CHARS for c in s)
 
 
 def _number(v):
@@ -63,7 +61,7 @@ def apply(payload, dev, nets, connected_ssid=None):
     dev_changed = False
 
     slug = payload.get("slug")
-    if _valid_slug(slug) and slug != d["slug"]:
+    if config.valid_slug(slug) and slug != d["slug"]:
         d["slug"] = slug
         dev_changed = True
 

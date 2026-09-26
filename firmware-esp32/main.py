@@ -14,7 +14,9 @@ Reliability (there is no init system on a microcontroller):
 Two mutually-exclusive modes keep peak RAM low:
   RUN  : STA connected + slug configured (either local or pushed from the
          server) -> poll loop.
-  SETUP: otherwise -> AP + captive portal + config UI.
+  SETUP: otherwise -> AP + captive portal + config UI. With WiFi saved and
+         the portal idle for SETUP_IDLE_RESET_S, reboots to retry (router back
+         up, or a slug assigned from the admin page meanwhile).
 
 Power is handled in hardware: the bar runs off a standalone LiPo charger board
 whose switched OUTPUT feeds the device, so a plain power switch gives true-off
@@ -24,7 +26,8 @@ OTA: while online, checks the server manifest (first good poll, then hourly) and
 self-updates via the ESP32 dual-app partitions (see ota.py). The first server
 answer after boot (health line or 404 unknown-slug) marks the running image
 valid; an image that can't reach the server within PROBATION_S reboots, and the
-bootloader rolls back.
+bootloader rolls back. A version that rolled back is then skipped until a
+different one is published (ota.note_boot / /data/ota.json).
 
 Remote config: right after WiFi connects and every remote_config.CHECK_EVERY_S,
 pulls this board's server-pushed config (see remote_config.py, device.py).
@@ -47,6 +50,7 @@ WDT_TIMEOUT_MS = 8000
 OFFLINE_RESET_SECONDS = 90
 OTA_CHECK_EVERY_S = 3600   # check for a firmware update at most this often
 PROBATION_S = 180          # a new image that can't reach the server this long reboots (-> rollback)
+SETUP_IDLE_RESET_S = 180   # setup portal idle this long with WiFi saved -> reboot and retry
 
 
 # ----- platform helpers (degrade gracefully off-device) -------------------
@@ -115,6 +119,27 @@ def choose_mode(connected, has_slug):
     return "run" if (connected and has_slug) else "setup"
 
 
+def setup_idle_s(since_start_s, since_activity_s):
+    """Seconds the setup portal has been idle: measured from the later of
+    setup-mode start and the last real portal activity (None = none yet)."""
+    if since_activity_s is None or since_activity_s > since_start_s:
+        return since_start_s
+    return since_activity_s
+
+
+def setup_should_reset(has_nets, idle_s):
+    """Leave setup mode by rebooting?
+
+    Only when WiFi is saved (so a reboot can reconnect: a fresh board waiting
+    for a slug from the admin page, or a router that was down) and the portal
+    has been idle for SETUP_IDLE_RESET_S. An inactivity timer rather than a
+    "was ever used" flag, so a phone that auto-joins the AP and auto-opens the
+    page only delays the retry. With no saved WiFi the portal is the only way
+    forward, so it serves forever.
+    """
+    return has_nets and idle_s > SETUP_IDLE_RESET_S
+
+
 # ----- render thread ------------------------------------------------------
 
 def _render_loop(engine, strip, fps, wdt, stop):
@@ -180,6 +205,7 @@ def _run_mode(dev, engine, net, ident, strip):
             offline_since = None
             if not image_confirmed:
                 ota.mark_valid()  # cancels rollback of a freshly-OTA'd image
+                ota.note_confirmed(DATA_DIR)  # ...so the pending update took
                 image_confirmed = True
             if data == poll.UNKNOWN_SLUG:
                 engine.set_status(anim.OFFLINE)  # fix the slug in the admin page
@@ -190,8 +216,8 @@ def _run_mode(dev, engine, net, ident, strip):
             if last_ota is None or _elapsed_s(last_ota) > OTA_CHECK_EVERY_S:
                 last_ota = _ticks()
                 try:
-                    manifest, available = ota.check(dev)
-                    if available and ota.apply_update(dev, manifest):
+                    manifest, available = ota.check(dev, DATA_DIR)
+                    if available and ota.apply_update(dev, manifest, DATA_DIR):
                         ota.reboot()
                 except Exception:
                     pass  # OTA is best-effort; never let it wedge the bar
@@ -209,12 +235,30 @@ def _run_mode(dev, engine, net, ident, strip):
 
 # ----- setup mode ---------------------------------------------------------
 
-def _setup_mode(engine, net):
+async def _setup_idle_watch(p, has_nets):
+    """Reboot out of an idle setup portal (see setup_should_reset)."""
+    import uasyncio
+    started = _ticks()
+    while True:
+        await uasyncio.sleep(5)
+        last = p.last_activity
+        idle = setup_idle_s(_elapsed_s(started), None if last is None else _elapsed_s(last))
+        if setup_should_reset(has_nets, idle):
+            _reset()  # reconnect, re-check config (maybe a slug was assigned)
+
+
+async def _setup(p, has_nets):
+    import uasyncio
+    uasyncio.create_task(_setup_idle_watch(p, has_nets))
+    await p.serve()
+
+
+def _setup_mode(engine, net, has_nets):
     import uasyncio
     import portal
     engine.set_status(anim.CONNECTING)
-    p = portal.Portal(net, DATA_DIR, reset=_reset)
-    uasyncio.run(p.serve())
+    p = portal.Portal(net, DATA_DIR, reset=_reset, ticks=_ticks)
+    uasyncio.run(_setup(p, has_nets))
 
 
 # ----- entrypoint ----------------------------------------------------------
@@ -232,6 +276,7 @@ def run():
 
 
 def _run():
+    ota.note_boot(DATA_DIR)  # a staged update we aren't running rolled back: skip it
     dev = config.load_device(DATA_DIR)
     theme = config.load_theme(DATA_DIR)
     engine = anim.Engine(theme, dev.num_leds)
@@ -258,7 +303,8 @@ def _run():
     if choose_mode(connected, bool(dev.slug)) == "run":
         _run_mode(dev, engine, net, ident, strip)
     else:
-        _setup_mode(engine, net)
+        # Re-read: a config check may have pushed networks since `nets` was loaded.
+        _setup_mode(engine, net, bool(config.load_wifi(DATA_DIR)))
 
 
 if __name__ == "__main__":

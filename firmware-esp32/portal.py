@@ -92,10 +92,16 @@ def parse_form(body):
 
 # ----- save handler -------------------------------------------------------
 
+BAD_SLUG = "bad_slug"
+BAD_SLUG_MSG = ("Slug must be 1-64 characters of a-z, 0-9, '.', '_' or '-'. "
+                "Nothing was saved.")
+
+
 def apply_save(form, data_dir="data"):
     """Apply a submitted form to flash config. Returns one of:
     'wifi' (a network was added -> reboot into RUN mode),
-    'removed', 'device', or '' (nothing actionable).
+    'removed', 'device', '' (nothing actionable), or BAD_SLUG (the slug is
+    invalid; nothing was saved, so the page can say so instead of rebooting).
     """
     action = ""
     remove = form.get("remove_ssid", "").strip()
@@ -103,6 +109,12 @@ def apply_save(form, data_dir="data"):
         nets = config.remove_wifi(config.load_wifi(data_dir), remove)
         config.save_wifi(nets, data_dir)
         return "removed"
+
+    # The slug ends up in the X-Slug header, so a CR/LF must never get through.
+    # Validate before writing anything; blank still means "keep the current one".
+    slug = form.get("slug", "").strip().lower()
+    if slug and not config.valid_slug(slug):
+        return BAD_SLUG
 
     ssid = form.get("ssid", "").strip()
     if ssid:
@@ -118,7 +130,6 @@ def apply_save(form, data_dir="data"):
 
     dev = config.load_device(data_dir)
     changed = False
-    slug = form.get("slug", "").strip()
     if slug and slug != dev.slug:
         dev.slug = slug
         changed = True
@@ -211,16 +222,34 @@ def _ok_html(html):
            b"Connection: close\r\n\r\n" % len(body) + body
 
 
+def is_activity(method, path):
+    """Does this request mean someone is using the portal? Any POST (a save) or
+    a GET of the form page; OS captive-probe redirects don't count."""
+    return method == "POST" or path == "/"
+
+
+def _default_ticks():
+    import time
+    try:
+        return time.ticks_ms()
+    except AttributeError:
+        return int(time.monotonic() * 1000)
+
+
 # ----- async server -------------------------------------------------------
 
 class Portal:
-    def __init__(self, net, data_dir="data", reset=None):
+    def __init__(self, net, data_dir="data", reset=None, ticks=None):
         self.net = net
         self.data_dir = data_dir
         self._ssids = net.scan() if net else []
         self.ip = net.start_ap() if net else "192.168.4.1"
         self._reset = reset
         self._should_reboot = False
+        self._ticks = ticks or _default_ticks
+        # Tick of the last real use of the portal (see is_activity), or None.
+        # main.py reboots out of setup mode once it has been idle long enough.
+        self.last_activity = None
 
     async def serve(self):
         import uasyncio
@@ -254,6 +283,10 @@ class Portal:
             parts = line.split(b" ")
             method = parts[0].decode() if parts else "GET"
             path = parts[1].decode() if len(parts) > 1 else "/"
+            if is_activity(method, path):
+                # Stamp before reading the body / saving, so the idle reset
+                # can't fire while a save is in flight.
+                self.last_activity = self._ticks()
             length = 0
             while True:
                 h = await reader.readline()
@@ -279,11 +312,13 @@ class Portal:
     def _respond(self, method, path, body):
         if method == "POST":
             action = apply_save(parse_form(body), self.data_dir)
+            if action == BAD_SLUG:
+                return _ok_html(render_page(self.data_dir, self._ssids, BAD_SLUG_MSG))
             if action in ("wifi", "device"):
                 self._should_reboot = True
                 return _ok_html("<h1>Saved &mdash; rebooting&hellip;</h1>"
                                 "<p>The bar is applying your settings now.</p>")
             return _ok_html(render_page(self.data_dir, self._ssids, "Saved."))
         if path != "/":
-            return _redirect(self.ip)
+            return _redirect(self.ip)  # OS probes etc.: not a sign anyone is here
         return _ok_html(render_page(self.data_dir, self._ssids))

@@ -8,7 +8,8 @@ with no auth):
 
 On the ESP32 we consume that with the built-in dual-app OTA (`esp32.Partition`):
 
-  1. Fetch + parse the manifest; skip if its version <= our FIRMWARE_VERSION.
+  1. Fetch + parse the manifest; skip if its version <= our FIRMWARE_VERSION,
+     or if it's a version that already rolled back here (see below).
   2. Stream image.bin straight into the *next* OTA partition (never buffered
      whole — a full image is far larger than free heap), hashing as we go.
   3. Verify streamed size + SHA-256 against the manifest; abort on mismatch.
@@ -18,10 +19,29 @@ On the ESP32 we consume that with the built-in dual-app OTA (`esp32.Partition`):
      to the previous partition — provided the build enables rollback
      (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE). See README.md#ota.
 
-``parse_manifest`` is pure and host-tested. Everything touching flash is guarded
-so importing this module is harmless off-device.
+Skipping a version that rolled back: without this, the previous image would
+confirm on its first good poll, see the same newer manifest and download the
+bad image again every few minutes. ``/data/ota.json`` records it:
+
+  - ``apply_update`` adds ``"pending": v`` after ``set_boot`` (keeping any
+    failure record).
+  - ``note_boot`` (early on every boot): pending but we are *not* running v ->
+    the bootloader rolled back, so record ``{"failed": v, "attempts": n}``
+    (n counts up for the same v, restarts at 1 for a different one).
+  - ``note_confirmed`` (when the image is confirmed): clear the marker.
+    Clearing happens on confirmation, not on boot, because a booted image can
+    still roll back until it reaches the server.
+  - ``check`` offers ``failed`` again until it has rolled back
+    ``OTA_MAX_ATTEMPTS`` (2) times, so one transient outage during probation
+    can't blacklist a good image; after that it is skipped until a different
+    version is published. A full flash erase clears the marker.
+
+``parse_manifest`` and the marker transitions are pure and host-tested.
+Everything touching flash is guarded so importing this module is harmless
+off-device.
 """
 
+import config
 import version
 
 # This build's board namespace on the server. Firmware images are served per
@@ -29,6 +49,10 @@ import version
 BOARD = "esp32"
 
 _SHA_RE_LEN = 64
+
+# A version that rolls back this many times is skipped until a different one is
+# published. 2 = one retry, so one transient outage can't blacklist a good image.
+OTA_MAX_ATTEMPTS = 2
 
 
 def parse_manifest(text):
@@ -70,11 +94,128 @@ def _hexdigest(h):
         return "".join("%02x" % b for b in h.digest())
 
 
-def check(dev):
+# ----- rollback marker (/data/ota.json) -----------------------------------
+
+def _ver(v):
+    """v if it's a real non-negative JSON int (not a bool), else None."""
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        return None
+    return v
+
+
+def parse_state(obj):
+    """Normalise a loaded marker to its known keys: pending, failed, attempts. Pure.
+
+    ``attempts`` only means something alongside ``failed``; an old marker
+    without a valid count (>= 1) counts as one attempt.
+    """
+    out = {}
+    if not isinstance(obj, dict):
+        return out
+    for k in ("pending", "failed"):
+        v = _ver(obj.get(k))
+        if v is not None:
+            out[k] = v
+    if "failed" in out:
+        n = _ver(obj.get("attempts"))
+        out["attempts"] = n if n else 1
+    return out
+
+
+def state_on_boot(state, running):
+    """Marker after a boot of version `running`. Pure.
+
+    A pending version we aren't running means the bootloader rolled back:
+    count one more failed attempt for it (restarting the count for a version
+    other than the one already recorded).
+    """
+    pending = state.get("pending")
+    if pending is None or pending == running:
+        return state
+    if state.get("failed") == pending:
+        return {"failed": pending, "attempts": state.get("attempts", 1) + 1}
+    return {"failed": pending, "attempts": 1}
+
+
+def state_on_stage(state, staged):
+    """Marker once `staged` is set to boot next. Keeps any failure record. Pure."""
+    new = dict(state)
+    new["pending"] = staged
+    return new
+
+
+def state_on_confirm(state, running):
+    """Marker once the running image is confirmed healthy. Pure.
+
+    The pending update took, so the whole marker goes, including a failure
+    record for this version (a retry that worked) or an older one.
+    """
+    if state.get("pending") == running:
+        return {}
+    return state
+
+
+def is_available(manifest_version, running, state):
+    """Offer an update iff it's newer than us and hasn't already rolled back
+    OTA_MAX_ATTEMPTS times on this board."""
+    if manifest_version <= running:
+        return False
+    return not (manifest_version == state.get("failed")
+                and state.get("attempts", 1) >= OTA_MAX_ATTEMPTS)
+
+
+def _state_path(data_dir):
+    return data_dir + "/ota.json"
+
+
+def load_state(data_dir):
+    """Read the marker. Missing/unreadable -> {}. Never raises."""
+    try:
+        return parse_state(config._read_json(_state_path(data_dir), {}))
+    except Exception:
+        return {}
+
+
+def _save_state(data_dir, state):
+    try:
+        config._write_json(_state_path(data_dir), state)
+    except Exception:
+        # Never raise into the poll loop. But this isn't harmless: a lost
+        # {"pending"} write means a rollback goes unnoticed, so a bad image can
+        # be downloaded again on every OTA check, as before this marker existed.
+        pass
+
+
+def _transition(data_dir, fn, running):
+    state = load_state(data_dir)
+    new = fn(state, version.FIRMWARE_VERSION if running is None else running)
+    if new != state:  # only touch flash when something changed
+        _save_state(data_dir, new)
+
+
+def note_boot(data_dir, running=None):
+    """Call early on every boot: turns a pending marker into failed after a rollback."""
+    _transition(data_dir, state_on_boot, running)
+
+
+def note_confirmed(data_dir, running=None):
+    """Call when the running image is confirmed: the pending update took."""
+    _transition(data_dir, state_on_confirm, running)
+
+
+def note_staged(data_dir, staged_version):
+    """Record that staged_version is set to boot next."""
+    _save_state(data_dir, state_on_stage(load_state(data_dir), staged_version))
+
+
+# ----- check + apply -------------------------------------------------------
+
+def check(dev, data_dir):
     """Fetch the manifest and decide if an update is available.
 
     Returns (manifest_dict, available_bool). available is True iff the server
-    version is strictly newer than ours.
+    version is strictly newer than ours and isn't a version that already
+    rolled back on this board.
     """
     import poll
     body = poll.http_get(dev.server_host, "/firmware/%s/latest" % BOARD,
@@ -82,7 +223,7 @@ def check(dev):
     m = parse_manifest(body)
     if not m:
         return (None, False)
-    return (m, m["version"] > version.FIRMWARE_VERSION)
+    return (m, is_available(m["version"], version.FIRMWARE_VERSION, load_state(data_dir)))
 
 
 def _stream_image_to_partition(dev, m):
@@ -178,20 +319,22 @@ def _stream_image_to_partition(dev, m):
             pass
 
 
-def apply_update(dev, m):
+def apply_update(dev, m, data_dir):
     """Stream + verify + set_boot the image described by manifest m.
 
     Returns True if the new partition is staged and the caller should reboot;
-    False on any failure (the current image stays bootable).
+    False on any failure (the current image stays bootable). On success the
+    staged version is recorded as pending in data_dir/ota.json.
     """
     part = _stream_image_to_partition(dev, m)
     if part is None:
         return False
     try:
         part.set_boot()
-        return True
     except Exception:
         return False
+    note_staged(data_dir, m["version"])
+    return True
 
 
 def mark_valid():

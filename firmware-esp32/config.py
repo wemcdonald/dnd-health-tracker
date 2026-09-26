@@ -53,6 +53,16 @@ DEFAULT_THEME = {
 }
 
 
+# A slug goes into a URL path and the X-Slug header, so it must be a plain
+# token: [a-z0-9._-]{1,64} (same rule as the server).
+SLUG_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789._-"
+SLUG_MAX = 64
+
+
+def valid_slug(s):
+    return isinstance(s, str) and 0 < len(s) <= SLUG_MAX and all(c in SLUG_CHARS for c in s)
+
+
 class Device:
     """Per-unit identity and hardware configuration."""
 
