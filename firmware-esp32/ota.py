@@ -226,6 +226,44 @@ def check(dev, data_dir):
     return (m, is_available(m["version"], version.FIRMWARE_VERSION, load_state(data_dir)))
 
 
+class _BlockWriter:
+    """Chop a byte stream into fixed-size flash blocks for write_block(n, buf).
+
+    Fills one preallocated block buffer in place: MicroPython's bytearray has
+    no slice deletion, so trimming a growing buffer (del buf[:n]) raises
+    TypeError on the device even though it works under CPython. The last
+    partial block is padded with 0xFF (erased-flash value).
+    """
+
+    def __init__(self, write_block, block_size):
+        self._write_block = write_block
+        self._size = block_size
+        self._buf = bytearray(block_size)
+        self._fill = 0
+        self._next = 0
+
+    def write(self, data):
+        mv = memoryview(data)
+        i = 0
+        while i < len(mv):
+            take = min(self._size - self._fill, len(mv) - i)
+            self._buf[self._fill:self._fill + take] = mv[i:i + take]
+            self._fill += take
+            i += take
+            if self._fill == self._size:
+                self._flush()
+
+    def finish(self):
+        if self._fill:
+            self._buf[self._fill:] = b"\xff" * (self._size - self._fill)
+            self._flush()
+
+    def _flush(self):
+        self._write_block(self._next, self._buf)
+        self._next += 1
+        self._fill = 0
+
+
 def _stream_image_to_partition(dev, m):
     """Download image.bin straight into the next OTA partition, verifying hash.
 
@@ -273,37 +311,21 @@ def _stream_image_to_partition(dev, m):
         body_start = header.split(b"\r\n\r\n", 1)[1]
 
         h = hashlib.sha256()
-        buf = bytearray()
-        block_num = 0
+        writer = _BlockWriter(part.writeblocks, block_size)
         received = 0
 
-        def flush_full_blocks(final):
-            nonlocal block_num
-            while len(buf) >= block_size:
-                part.writeblocks(block_num, bytes(buf[:block_size]))
-                del buf[:block_size]
-                block_num += 1
-            if final and buf:
-                pad = block_size - len(buf)
-                part.writeblocks(block_num, bytes(buf) + b"\xff" * pad)
-                block_num += 1
-                del buf[:]
-
-        for chunk in (body_start,):
+        chunk = body_start  # may be empty if the headers arrived alone
+        while True:
             if chunk:
                 h.update(chunk)
                 received += len(chunk)
-                buf.extend(chunk)
-                flush_full_blocks(False)
-        while received < m["size"]:
+                writer.write(chunk)
+            if received >= m["size"]:
+                break
             chunk = s.recv(1024)
             if not chunk:
                 break
-            h.update(chunk)
-            received += len(chunk)
-            buf.extend(chunk)
-            flush_full_blocks(False)
-        flush_full_blocks(True)
+        writer.finish()
 
         if received != m["size"]:
             return None

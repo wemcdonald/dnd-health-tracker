@@ -229,6 +229,52 @@ def test_apply_update_stream_failure_leaves_no_marker():
         assert not os.path.exists(_state_file(d))
 
 
+class _MicroPythonBytearray(bytearray):
+    """CPython bytearray minus slice deletion, which MicroPython lacks
+    ("'bytearray' object doesn't support item deletion")."""
+
+    def __delitem__(self, key):
+        raise TypeError("'bytearray' object doesn't support item deletion")
+
+
+def _write_blocks(chunks, block_size=8):
+    written = []
+    real = getattr(ota, "bytearray", None)
+    ota.bytearray = _MicroPythonBytearray  # shadow the builtin inside ota only
+    try:
+        w = ota._BlockWriter(lambda n, buf: written.append((n, bytes(buf))), block_size)
+        for c in chunks:
+            w.write(c)
+        w.finish()
+    finally:
+        if real is None:
+            del ota.bytearray
+        else:
+            ota.bytearray = real
+    return written
+
+
+def test_block_writer_splits_stream_into_numbered_blocks():
+    written = _write_blocks([b"abc", b"defghij", b"klmnop"])
+    assert written == [(0, b"abcdefgh"), (1, b"ijklmnop")]
+
+
+def test_block_writer_pads_the_last_block_with_ff():
+    written = _write_blocks([b"abcdefghij"])
+    assert written == [(0, b"abcdefgh"), (1, b"ij" + b"\xff" * 6)]
+
+
+def test_block_writer_handles_chunks_larger_than_a_block():
+    data = bytes(range(40))
+    written = _write_blocks([data[:1], data[1:37], data[37:]])
+    assert [n for n, _ in written] == list(range(5))
+    assert b"".join(b for _, b in written) == data
+
+
+def test_block_writer_writes_nothing_for_an_empty_stream():
+    assert _write_blocks([b""]) == []
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
