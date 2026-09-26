@@ -12,12 +12,11 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-// Per-board max image size (must not exceed the board's OTA slot/partition).
-// Pico: A/B slot capacity 1992 KiB. ESP32: MicroPython dual-OTA app partition
-// (conservative default; override with FW_MAX_BYTES if your partition differs).
+// Pico: A/B slot capacity 1992 KiB. ESP32: HEALTHBAR_C3 ota_0/ota_1 = 0x1D0000
+// (firmware-esp32/board/HEALTHBAR_C3/partitions.csv); override with FW_MAX_BYTES.
 const BOARD_MAX_BYTES = {
   pico: 1992 * 1024,
-  esp32: Number(process.env.FW_MAX_BYTES) || 1966080, // 1920 KiB default
+  esp32: Number(process.env.FW_MAX_BYTES) || 0x1d0000,
 };
 
 const [, , board, imagePath, versionArg] = process.argv;
