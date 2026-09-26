@@ -5,6 +5,11 @@
  *   POST /admin/characters             -> add/update a character
  *   POST /admin/characters/:slug/delete-> remove a character
  *   POST /admin/settings               -> set the Cobalt cookie (for WSS)
+ *   POST /admin/devices/:mac           -> set a board's managed config (label/slug/brightness/pollSeconds)
+ *   POST /admin/devices/:mac/wifi      -> add/update or remove a managed WiFi row for a board
+ *   POST /admin/devices/:mac/wifi/delete -> stop managing a WiFi row for a board
+ *   POST /admin/devices/:mac/forget    -> clear a board's token (next check-in re-registers)
+ *   POST /admin/devices/:mac/delete    -> remove a board and its managed settings
  *
  * SECURITY: this UI has no built-in auth and exposes setting the Cobalt cookie (a
  * full DDB account credential). Run it behind your reverse proxy's auth / on a
@@ -15,14 +20,24 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   type Character,
+  type Device,
   listCharacters,
   upsertCharacter,
   deleteCharacter,
   getSetting,
   setSetting,
   COBALT_COOKIE_KEY,
+  listDevices,
+  getDevice,
+  listDeviceWifi,
+  updateDeviceConfig,
+  upsertDeviceWifi,
+  deleteDeviceWifi,
+  forgetDevice,
+  deleteDevice,
 } from "../db.js";
 import { allLiveStates, syncManagers } from "../manager.js";
+import { formatMac, MAC_RE, SLUG_RE } from "../devices.js";
 
 const ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] ?? "";
 
@@ -51,6 +66,63 @@ function authorized(req: FastifyRequest): boolean {
 
 function denied(reply: FastifyReply): FastifyReply {
   return reply.code(401).type("text/plain").send("unauthorized (ADMIN_PASSWORD required)\n");
+}
+
+/** Parse an optional numeric form field: blank -> null (unmanaged); NaN/out of range -> "invalid". */
+function optionalNumber(raw: string | undefined, lo: number, hi: number): number | null | "invalid" {
+  const s = (raw ?? "").trim();
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= lo && n <= hi ? n : "invalid";
+}
+
+function ago(ms: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  return s < 120 ? `${s}s ago` : s < 7200 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+}
+
+function boardsSection(knownSlugs: ReadonlySet<string>): string {
+  const keyField = ADMIN_PASSWORD ? '<label>admin key <input type="text" name="key"></label>' : "";
+  const cards = listDevices().map((d: Device) => {
+    const base = `/admin/devices/${esc(d.mac)}`;
+    const slugWarn = d.reportedSlug && !knownSlugs.has(d.reportedSlug)
+      ? ` <span class="err">(not a known character)</span>` : "";
+    const wifiRows = listDeviceWifi(d.mac).map((w) => `<tr>
+        <td>${esc(w.ssid)}</td><td>${esc(w.action)}</td><td>${w.action === "upsert" ? esc(w.priority) : ""}</td>
+        <td><form method="POST" action="${base}/wifi/delete" style="display:inline">${keyField}
+          <input type="hidden" name="ssid" value="${esc(w.ssid)}"><button>drop</button></form></td>
+      </tr>`).join("\n");
+    return `<fieldset>
+<legend><code>${esc(formatMac(d.mac))}</code> ${esc(d.label)}</legend>
+<p><small>last seen ${esc(ago(d.lastSeen))} · fw v${esc(d.fwVersion || "?")} · LAN ${esc(d.localIp || "?")}
+ · showing <code>${esc(d.reportedSlug || "—")}</code>${slugWarn} · rev ${d.configRev}
+ ${d.tokenSha256 === null ? " · <b>forgotten: re-registers on next check-in</b>" : ""}</small></p>
+<form method="POST" action="${base}">${keyField}
+  <label>label <input type="text" name="label" value="${esc(d.label)}"></label>
+  <label>slug (blank = not managed) <input type="text" name="slug" value="${esc(d.slug ?? "")}" list="slugs"></label>
+  <label>brightness 0–1 (blank = not managed) <input type="text" name="brightness" value="${esc(d.brightness ?? "")}"></label>
+  <label>poll seconds 2–300 (blank = not managed) <input type="text" name="pollSeconds" value="${esc(d.pollSeconds ?? "")}"></label>
+  <button type="submit">save</button>
+</form>
+<table><tr><th>wifi ssid</th><th>action</th><th>priority</th><th></th></tr>
+${wifiRows || '<tr><td colspan="4"><em>no managed networks</em></td></tr>'}</table>
+<form method="POST" action="${base}/wifi">${keyField}
+  <label>ssid <input type="text" name="ssid" required></label>
+  <label>password (not shown again) <input type="text" name="psk"></label>
+  <label>priority <input type="text" name="priority" value="0"></label>
+  <label>action <select name="action"><option value="upsert">add/update</option><option value="remove">remove from board</option></select></label>
+  <button type="submit">save network</button>
+</form>
+<form method="POST" action="${base}/forget" style="display:inline" onsubmit="return confirm('Forget this board? Its next check-in re-registers.')">${keyField}<button>forget token</button></form>
+<form method="POST" action="${base}/delete" style="display:inline" onsubmit="return confirm('Delete this board and its settings?')">${keyField}<button>delete board</button></form>
+</fieldset>`;
+  }).join("\n");
+  const options = [...knownSlugs].map((s) => `<option value="${esc(s)}">`).join("");
+  return `<h2>Boards</h2>
+<p><small>Boards register themselves on first check-in (<code>/device/&lt;mac&gt;/config</code>) and pick up changes within ~5 min.
+WiFi rows are add/update or remove; dropping a row just stops managing it.</small></p>
+<datalist id="slugs">${options}</datalist>
+${cards || "<p><em>no boards have checked in yet</em></p>"}`;
 }
 
 function page(): string {
@@ -125,6 +197,8 @@ ${rows || '<tr><td colspan="5"><em>no characters yet</em></td></tr>'}
 </form>
 </fieldset>
 
+${boardsSection(new Set(chars.map((c) => c.slug)))}
+
 <fieldset>
 <legend>Cobalt cookie (for the WSS fast path)</legend>
 <p><small>Currently ${cobaltSet ? "<b>set</b>" : "<b>not set</b>"} — polling works without it. Paste the full <code>Cobalt</code> cookie (e.g. <code>CobaltSession=…</code>). Never displayed back.</small></p>
@@ -180,6 +254,82 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       setSetting(COBALT_COOKIE_KEY, cookie);
       syncManagers(); // rewire WSS with the new cookie
     }
+    return reply.redirect("/");
+  });
+
+  /** Validate a MAC param and look up the board, replying 400/404 as needed. Returns undefined on failure. */
+  function knownBoard(mac: string, reply: FastifyReply): Device | undefined {
+    if (!MAC_RE.test(mac)) {
+      reply.code(400).type("text/plain").send("bad mac\n");
+      return undefined;
+    }
+    const d = getDevice(mac);
+    if (!d) {
+      reply.code(404).type("text/plain").send("unknown board\n");
+      return undefined;
+    }
+    return d;
+  }
+
+  app.post<{ Params: { mac: string }; Body: Record<string, string> }>("/admin/devices/:mac", async (req, reply) => {
+    if (!authorized(req)) return denied(reply);
+    const mac = req.params.mac;
+    if (!knownBoard(mac, reply)) return reply;
+    const b = req.body ?? {};
+    const slugRaw = (b["slug"] ?? "").trim().toLowerCase();
+    if (slugRaw && !SLUG_RE.test(slugRaw)) {
+      return reply.code(400).type("text/plain").send("invalid slug (use a-z 0-9 . _ -)\n");
+    }
+    const brightness = optionalNumber(b["brightness"], 0, 1);
+    const pollSeconds = optionalNumber(b["pollSeconds"], 2, 300);
+    if (brightness === "invalid" || pollSeconds === "invalid") {
+      return reply.code(400).type("text/plain").send("brightness must be 0–1, poll seconds 2–300\n");
+    }
+    updateDeviceConfig(mac, {
+      label: (b["label"] ?? "").trim(),
+      slug: slugRaw || null,
+      brightness,
+      pollSeconds,
+    });
+    return reply.redirect("/");
+  });
+
+  app.post<{ Params: { mac: string }; Body: Record<string, string> }>("/admin/devices/:mac/wifi", async (req, reply) => {
+    if (!authorized(req)) return denied(reply);
+    const mac = req.params.mac;
+    if (!knownBoard(mac, reply)) return reply;
+    const b = req.body ?? {};
+    const ssid = (b["ssid"] ?? "").trim();
+    const action = b["action"] === "remove" ? "remove" : "upsert";
+    const priority = Number((b["priority"] ?? "0").trim() || "0");
+    if (!ssid || ssid.length > 32 || !Number.isInteger(priority)) {
+      return reply.code(400).type("text/plain").send("need a valid ssid (<=32 chars) and integer priority\n");
+    }
+    upsertDeviceWifi({ mac, ssid, psk: action === "upsert" ? b["psk"] ?? "" : "", priority, action });
+    return reply.redirect("/");
+  });
+
+  app.post<{ Params: { mac: string }; Body: Record<string, string> }>("/admin/devices/:mac/wifi/delete", async (req, reply) => {
+    if (!authorized(req)) return denied(reply);
+    const mac = req.params.mac;
+    if (!knownBoard(mac, reply)) return reply;
+    deleteDeviceWifi(mac, (req.body?.["ssid"] ?? "").trim());
+    return reply.redirect("/");
+  });
+
+  app.post<{ Params: { mac: string } }>("/admin/devices/:mac/forget", async (req, reply) => {
+    if (!authorized(req)) return denied(reply);
+    const mac = req.params.mac;
+    if (!knownBoard(mac, reply)) return reply;
+    forgetDevice(mac);
+    return reply.redirect("/");
+  });
+
+  app.post<{ Params: { mac: string } }>("/admin/devices/:mac/delete", async (req, reply) => {
+    if (!authorized(req)) return denied(reply);
+    const mac = req.params.mac;
+    if (!knownBoard(mac, reply)) return reply;
+    deleteDevice(mac);
     return reply.redirect("/");
   });
 }
