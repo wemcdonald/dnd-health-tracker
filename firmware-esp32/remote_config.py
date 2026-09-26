@@ -10,12 +10,13 @@ Merge rules (see ../docs/firmware-contract.md section 4):
     typo on the server can't cause an endless retry loop
   - WiFi is add/update only; a remove never touches the connected SSID
 
-apply() is pure and host-tested; check() does the HTTP + persistence.
+apply() is pure and host-tested; check() fetches, applies and persists.
 """
 
 import json
 
 import config
+import device
 
 SLUG_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789._-"
 CHECK_EVERY_S = 300
@@ -104,3 +105,37 @@ def apply(payload, dev, nets, connected_ssid=None):
                     out = config.remove_wifi(out, ssid)
 
     return Result(config.Device(d), out, int(payload.get("rev", 0)), dev_changed, out != before)
+
+
+def check(dev, ident, mac, fw_version, connected_ssid, local_ip, data_dir, http=None):
+    """Fetch this board's config and apply it. Never raises.
+
+    Returns the new Device if any Device field changed (caller swaps it in and
+    applies brightness live), else None. WiFi changes are saved to wifi.json and
+    take effect on the next (re)connect.
+    """
+    try:
+        if http is None:
+            import poll
+            http = poll.http_request
+        resp = http(dev.server_host, "/device/%s/config" % mac, port=dev.server_port, timeout=8,
+                    headers={"X-Device-Token": ident["token"],
+                             "X-Config-Rev": str(ident["config_rev"]),
+                             "X-Firmware-Version": str(fw_version),
+                             "X-Slug": dev.slug,
+                             "X-Local-IP": local_ip or ""})
+        if resp is None or resp[0] != 200:
+            return None  # 304 up to date, 403 token mismatch, or network error
+        payload = parse_body(resp[2])
+        if payload is None:
+            return None
+        r = apply(payload, dev, config.load_wifi(data_dir), connected_ssid)
+        if r.wifi_changed:
+            config.save_wifi(r.nets, data_dir)
+        if r.dev_changed:
+            config.save_device(r.dev, data_dir)
+        ident["config_rev"] = r.rev
+        device.save_identity(ident, data_dir)
+        return r.dev if r.dev_changed else None
+    except Exception:
+        return None

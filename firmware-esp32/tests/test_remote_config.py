@@ -3,12 +3,15 @@
     cd firmware-esp32 && python3 tests/test_remote_config.py
 """
 
+import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
+import device  # noqa: E402
 import remote_config  # noqa: E402
 
 
@@ -95,6 +98,62 @@ def test_parse_body():
     assert remote_config.parse_body("[1]") is None
     assert remote_config.parse_body("not json") is None
     assert remote_config.parse_body('{"rev": "x"}') is None
+
+
+def _check(data_dir, responder, dev=None):
+    ident = device.load_identity(data_dir, token_factory=lambda: "a" * 32)
+    calls = []
+
+    def fake_http(host, path, port=80, timeout=8, headers=None):
+        calls.append((host, path, headers))
+        return responder()
+
+    new = remote_config.check(dev or _dev(slug="nan"), ident, mac="ac276e7d1774", fw_version=2,
+                              connected_ssid="Home", local_ip="10.0.10.93",
+                              data_dir=data_dir, http=fake_http)
+    return new, calls
+
+
+def test_check_applies_persists_and_sends_headers():
+    with tempfile.TemporaryDirectory() as d:
+        body = json.dumps({"rev": 4, "slug": "shen",
+                           "wifi": {"upsert": [_net("Cabin")]}})
+        new, calls = _check(d, lambda: (200, {}, body))
+        assert new is not None and new.slug == "shen"
+        assert config.load_device(d).slug == "shen"
+        assert [n["ssid"] for n in config.load_wifi(d)] == ["Cabin"]
+        assert device.load_identity(d)["config_rev"] == 4
+        host, path, headers = calls[0]
+        assert (host, path) == ("dndhealth.willflix.org", "/device/ac276e7d1774/config")
+        assert headers == {"X-Device-Token": "a" * 32, "X-Config-Rev": "0",
+                           "X-Firmware-Version": "2", "X-Slug": "nan",
+                           "X-Local-IP": "10.0.10.93"}
+
+
+def test_check_wifi_only_change_returns_none_but_saves():
+    with tempfile.TemporaryDirectory() as d:
+        body = json.dumps({"rev": 2, "wifi": {"upsert": [_net("Cabin")]}})
+        new, _ = _check(d, lambda: (200, {}, body))
+        assert new is None
+        assert [n["ssid"] for n in config.load_wifi(d)] == ["Cabin"]
+        assert device.load_identity(d)["config_rev"] == 2
+
+
+def test_check_304_403_errors_change_nothing():
+    with tempfile.TemporaryDirectory() as d:
+        for responder in (lambda: (304, {}, ""), lambda: (403, {}, "token mismatch\n"),
+                          lambda: None, lambda: (200, {}, "not json")):
+            new, _ = _check(d, responder)
+            assert new is None
+        assert device.load_identity(d)["config_rev"] == 0
+
+
+def test_check_never_raises():
+    def boom():
+        raise OSError("network down")
+    with tempfile.TemporaryDirectory() as d:
+        new, _ = _check(d, boom)
+        assert new is None
 
 
 if __name__ == "__main__":
