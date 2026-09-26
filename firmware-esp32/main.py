@@ -12,31 +12,41 @@ Reliability (there is no init system on a microcontroller):
   - Sustained offline -> reset (re-selects networks, or drops into setup).
 
 Two mutually-exclusive modes keep peak RAM low:
-  RUN  : STA connected + slug configured -> poll loop.
+  RUN  : STA connected + slug configured (either local or pushed from the
+         server) -> poll loop.
   SETUP: otherwise -> AP + captive portal + config UI.
 
 Power is handled in hardware: the bar runs off a standalone LiPo charger board
 whose switched OUTPUT feeds the device, so a plain power switch gives true-off
 (zero draw) while USB still charges the cell upstream. No on-device sleep needed.
 
-OTA: while online, periodically checks the server manifest and self-updates via
-the ESP32 dual-app partitions (see ota.py). The first good poll after boot marks
-the running image valid, so a bad OTA rolls back on the next reset.
+OTA: while online, checks the server manifest (first good poll, then hourly) and
+self-updates via the ESP32 dual-app partitions (see ota.py). The first server
+answer after boot (health line or 404 unknown-slug) marks the running image
+valid; an image that can't reach the server within PROBATION_S reboots, and the
+bootloader rolls back.
+
+Remote config: right after WiFi connects and every remote_config.CHECK_EVERY_S,
+pulls this board's server-pushed config (see remote_config.py, device.py).
 """
 
 import gc
 
 import anim
 import config
+import device
 import leds
 import ota
 import poll
+import remote_config
+import version
 import wifi
 
 DATA_DIR = "/data"
 WDT_TIMEOUT_MS = 8000
 OFFLINE_RESET_SECONDS = 90
 OTA_CHECK_EVERY_S = 3600   # check for a firmware update at most this often
+PROBATION_S = 180          # a new image that can't reach the server this long reboots (-> rollback)
 
 
 # ----- platform helpers (degrade gracefully off-device) -------------------
@@ -109,11 +119,31 @@ def _render_loop(engine, strip, fps, wdt, stop):
         _sleep(period)
 
 
+def _config_check(dev, net, ident, strip):
+    """Pull server-pushed config; returns the (possibly new) Device. Never raises."""
+    try:
+        mac = device.mac_id()
+    except Exception:
+        return dev
+    new = remote_config.check(dev, ident, mac=mac, fw_version=version.FIRMWARE_VERSION,
+                              connected_ssid=net.connected_ssid(), local_ip=net.sta_ip(),
+                              data_dir=DATA_DIR)
+    if new is None:
+        return dev
+    try:
+        strip.brightness = new.brightness  # NeoStrip reads this every frame
+    except Exception:
+        pass
+    return new
+
+
 # ----- run mode (poll loop + OTA) -----------------------------------------
 
-def _run_mode(dev, engine, net):
+def _run_mode(dev, engine, net, ident, strip):
     engine.set_status(anim.ONLINE)
-    last_ota = 0.0
+    started = _monotonic()
+    last_ota = -OTA_CHECK_EVERY_S   # check for an update on the first good poll
+    last_cfg = started              # _run just did a config check
     offline_since = None
     image_confirmed = False
 
@@ -128,13 +158,18 @@ def _run_mode(dev, engine, net):
             elif now - offline_since > OFFLINE_RESET_SECONDS:
                 _reset()  # reboot -> reconnect, or fall into setup if it fails
         else:
+            # The server answered (health line or 404 unknown-slug): network and
+            # this image are fine.
             offline_since = None
-            cur, mx, temp, age = data
-            engine.set_health(anim.Health(cur, mx, temp))
-            engine.set_status(anim.ONLINE)
             if not image_confirmed:
-                ota.mark_valid()  # a good poll proves this image is healthy
+                ota.mark_valid()  # cancels rollback of a freshly-OTA'd image
                 image_confirmed = True
+            if data == poll.UNKNOWN_SLUG:
+                engine.set_status(anim.OFFLINE)  # fix the slug in the admin page
+            else:
+                cur, mx, temp, age = data
+                engine.set_health(anim.Health(cur, mx, temp))
+                engine.set_status(anim.ONLINE)
             if (now - last_ota) > OTA_CHECK_EVERY_S:
                 last_ota = now
                 try:
@@ -143,6 +178,13 @@ def _run_mode(dev, engine, net):
                         ota.reboot()
                 except Exception:
                     pass  # OTA is best-effort; never let it wedge the bar
+
+        if not image_confirmed and now - started > PROBATION_S:
+            _reset()  # a pending-verify image that never reached the server rolls back
+
+        if now - last_cfg > remote_config.CHECK_EVERY_S:
+            last_cfg = now
+            dev = _config_check(dev, net, ident, strip)
 
         gc.collect()
         _sleep(dev.poll_seconds)
@@ -187,11 +229,17 @@ def _run():
 
     connected = False
     nets = config.load_wifi(DATA_DIR)
-    if nets and dev.slug:
+    if nets:
         connected = net.connect_known(nets, timeout=15) is not None
 
+    ident = device.load_identity(DATA_DIR)
+    if connected:
+        # Before the first poll: may assign a slug to a fresh board, so a new bar
+        # only needs WiFi and the character is picked in the admin page.
+        dev = _config_check(dev, net, ident, strip)
+
     if choose_mode(connected, bool(dev.slug)) == "run":
-        _run_mode(dev, engine, net)
+        _run_mode(dev, engine, net, ident, strip)
     else:
         _setup_mode(engine, net)
 

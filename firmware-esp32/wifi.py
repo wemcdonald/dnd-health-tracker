@@ -78,7 +78,7 @@ class NetManager:
     def __init__(self):
         self._sta = None
         self._ap = None
-        self.connected_ssid = None
+        self._connected_ssid = None
 
     # -- station mode ------------------------------------------------------
 
@@ -89,7 +89,7 @@ class NetManager:
 
     def connect_known(self, networks, timeout=15):
         ssid = connect_known(networks, timeout=timeout, sta=self.sta())
-        self.connected_ssid = ssid
+        self._connected_ssid = ssid
         return ssid
 
     def is_online(self):
@@ -103,6 +103,14 @@ class NetManager:
             return self._sta.ifconfig()[0]
         except Exception:
             return None
+
+    def connected_ssid(self):
+        try:
+            if self._sta is not None and self._sta.isconnected():
+                return self._sta.config("ssid")
+        except Exception:
+            pass
+        return None
 
     # -- access-point (setup) mode ----------------------------------------
 
