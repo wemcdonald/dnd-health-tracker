@@ -14,8 +14,10 @@ Wire format (authoritative — see server/src/routes/dnd.ts):
     temp   temporary HP (separate buffer on top of cur)
     age_s  seconds since the server last refreshed from D&D Beyond (99999 = never)
 
-Anything that isn't a 200 with a parseable line-1 of >=4 ints with max>=1 is
-treated as **offline** by the caller (breathing animation), so a 404, garbage,
+A 404 (server reachable but slug unknown) maps to UNKNOWN_SLUG so the caller
+can treat it as a config problem rather than an outage. Anything else that
+isn't a 200 with a parseable line-1 of >=4 ints with max>=1 is treated as
+**offline** by the caller (breathing animation), so other non-200s, garbage,
 or the "0 0 0 99999" sentinel all degrade safely.
 
 ``parse_feed`` is pure so it runs under CPython for the host tests.
@@ -63,11 +65,48 @@ def _split_host_port(host):
     return host, 80
 
 
-def http_get(host, path, port=80, timeout=8):
-    """Minimal plain-HTTP/1.1 GET. Returns the response body string, or None.
+# Returned by classify_feed/fetch when the server answered 404: it is reachable
+# but doesn't know our slug. That's a config problem, not an outage, so the
+# caller must not count it toward the offline reset (and it proves an OTA image
+# healthy).
+UNKNOWN_SLUG = "unknown-slug"
 
-    Kept tiny and dependency-free (no urequests) to match the C poller. Returns
-    None on any DNS/connect/HTTP error or non-200 status.
+
+def parse_response(raw):
+    """Split a raw HTTP/1.x response. Returns (status, headers, body) or None.
+
+    headers keys are lowercased. Pure: host-tested.
+    """
+    if not raw:
+        return None
+    head, sep, body = raw.partition(b"\r\n\r\n")
+    if not sep:
+        return None
+    lines = head.split(b"\r\n")
+    parts = lines[0].split()
+    if len(parts) < 2 or not parts[0].startswith(b"HTTP/"):
+        return None
+    try:
+        status = int(parts[1])
+    except ValueError:
+        return None
+    headers = {}
+    for line in lines[1:]:
+        k, _, v = line.partition(b":")
+        if k:
+            headers[k.strip().lower().decode()] = v.strip().decode()
+    try:
+        text = body.decode()
+    except Exception:
+        return None
+    return (status, headers, text)
+
+
+def http_request(host, path, port=80, timeout=8, headers=None):
+    """Minimal plain-HTTP/1.1 GET. Returns (status, headers, body) or None.
+
+    None means a network-level failure (DNS/connect/timeout/unparseable). Kept
+    tiny and dependency-free (no urequests) to match the C poller.
     """
     import socket
 
@@ -76,7 +115,6 @@ def http_get(host, path, port=80, timeout=8):
     if port and port != 80:
         hport = port
 
-    addr = None
     try:
         addr = socket.getaddrinfo(hbare, hport)[0][-1]
     except Exception:
@@ -89,7 +127,10 @@ def http_get(host, path, port=80, timeout=8):
         except Exception:
             pass
         s.connect(addr)
-        req = "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" % (path, hbare)
+        req = "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n" % (path, hbare)
+        for k, v in (headers or {}).items():
+            req += "%s: %s\r\n" % (k, v)
+        req += "\r\n"
         s.send(req.encode())
         chunks = []
         while True:
@@ -105,21 +146,30 @@ def http_get(host, path, port=80, timeout=8):
             s.close()
         except Exception:
             pass
+    return parse_response(raw)
 
-    # Split status line / headers / body.
-    try:
-        head, _, body = raw.partition(b"\r\n\r\n")
-        status_line = head.split(b"\r\n", 1)[0]
-        # e.g. b"HTTP/1.1 200 OK"
-        if b" 200" not in status_line:
-            return None
-        return body.decode()
-    except Exception:
+
+def http_get(host, path, port=80, timeout=8):
+    """Body string of a 200 response, else None (used by ota.check)."""
+    r = http_request(host, path, port=port, timeout=timeout)
+    if r is None or r[0] != 200:
         return None
+    return r[2]
+
+
+def classify_feed(resp):
+    """Map an http_request result to (cur,max,temp,age) | UNKNOWN_SLUG | None."""
+    if resp is None:
+        return None
+    status, _, body = resp
+    if status == 404:
+        return UNKNOWN_SLUG
+    if status != 200:
+        return None
+    return parse_feed(body)
 
 
 def fetch(dev, timeout=8):
-    """Fetch + parse the configured device feed. Returns (cur,max,temp,age)|None."""
-    body = http_get(dev.server_host, "/%s.txt" % dev.slug,
-                    port=dev.server_port, timeout=timeout)
-    return parse_feed(body)
+    """Poll the device feed. Returns (cur,max,temp,age) | UNKNOWN_SLUG | None."""
+    return classify_feed(http_request(dev.server_host, "/%s.txt" % dev.slug,
+                                      port=dev.server_port, timeout=timeout))

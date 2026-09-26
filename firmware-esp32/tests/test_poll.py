@@ -56,6 +56,31 @@ def test_device_url():
     assert dev2.url == "http://10.0.0.5:8080/shen.txt"
 
 
+def test_parse_response_status_headers_body():
+    raw = (b"HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+           b"Content-Length: 22\r\n\r\nunknown character: nan\n")
+    assert poll.parse_response(raw) == (
+        404, {"content-type": "text/plain", "content-length": "22"}, "unknown character: nan\n")
+
+
+def test_parse_response_no_body():
+    assert poll.parse_response(b"HTTP/1.1 304 Not Modified\r\nX: y\r\n\r\n") == (304, {"x": "y"}, "")
+
+
+def test_parse_response_garbage():
+    assert poll.parse_response(b"garbage") is None
+    assert poll.parse_response(b"") is None
+    assert poll.parse_response(b"HTTP/1.1 abc\r\n\r\n") is None
+
+
+def test_classify_feed():
+    assert poll.classify_feed((200, {}, "1 10 0 0\n")) == (1, 10, 0, 0)
+    assert poll.classify_feed((404, {}, "unknown character: nan\n")) == poll.UNKNOWN_SLUG
+    assert poll.classify_feed((500, {}, "oops")) is None
+    assert poll.classify_feed((200, {}, "0 0 0 99999\n")) is None
+    assert poll.classify_feed(None) is None
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
