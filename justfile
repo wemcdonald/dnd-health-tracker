@@ -4,7 +4,7 @@
 #
 #   just build pico            build firmware for a board (pico | esp32)
 #   just flash pico            flash a USB-connected board (dev)
-#   just publish pico 2        build + publish an OTA image (version 2) to the server feed
+#   just publish pico 2        build + publish an OTA image (version REQUIRED, e.g. 2) to the server feed
 #   just set name shen         provision character slug over USB (pico)
 #   just set wifi SSID 'pw'    provision wifi (repeat pairs; priority = order)
 #   just test                  run host unit tests for both firmwares
@@ -104,9 +104,10 @@ flash board:
       *) echo "unknown board: {{board}} (pico|esp32)"; exit 1 ;;
     esac
 
-# build an OTA image and publish it to the server feed:  just publish pico [version]
-# Pico builds TBYB-flagged so a bad update auto-reverts on the device.
-publish board version="1":
+# Pico builds TBYB-flagged so a bad update auto-reverts on the device. version
+# is required (no default) so `just publish esp32` can't silently republish or
+# downgrade to v1: build an OTA image and publish it:  just publish pico <version>
+publish board version:
     #!/usr/bin/env sh
     set -e
     case "{{board}}" in
