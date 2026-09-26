@@ -83,8 +83,8 @@ touch.
 ## OTA
 
 Consumes the server's existing endpoints (plain HTTP, no auth):
-`GET /firmware/latest` (manifest `"<version> <size>\n<sha256>\n<imagePath>"`) and
-`GET /firmware/image.bin`.
+`GET /firmware/esp32/latest` (manifest `"<version> <size>\n<sha256>\n<imagePath>"`) and
+`GET /firmware/esp32/image.bin`.
 
 Flow (`ota.py` + `main.py`): while online, on the first good poll after boot
 and then at most every `OTA_CHECK_EVERY_S` (1 h), fetch the manifest; if its

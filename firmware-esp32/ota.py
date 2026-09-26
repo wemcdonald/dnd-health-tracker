@@ -3,8 +3,8 @@
 The server publishes (see server/src/routes/firmware.ts, served over plain HTTP
 with no auth):
 
-    GET /firmware/latest      -> manifest.txt:  "<version> <size>\\n<sha256>\\n<imagePath>\\n"
-    GET /firmware/image.bin   -> the raw application image
+    GET /firmware/esp32/latest -> manifest.txt:  "<version> <size>\\n<sha256>\\n<imagePath>\\n"
+    GET /firmware/esp32/image.bin -> the raw application image
 
 On the ESP32 we consume that with the built-in dual-app OTA (`esp32.Partition`):
 
