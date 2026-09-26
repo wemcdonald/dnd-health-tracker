@@ -56,8 +56,15 @@ build board version="1":
         # there, not BUILD). That makes mpy-cross write its own genhdr into our
         # BUILD dir and corrupts moduledefs.h (empty-mod_defs assert). Driving
         # idf.py -B directly avoids ever setting a make-level BUILD var.
+        # ESP-IDF only fills in SDKCONFIG_DEFAULTS keys that are MISSING from an
+        # existing build/idf/sdkconfig -- it never overwrites keys already set
+        # there. After editing sdkconfig.board or partitions.csv you must
+        # `rm -rf firmware-esp32/build/idf` or the change silently won't apply.
         [ -f "{{mpy_dir}}/ports/esp32/Makefile" ] || { echo "no MicroPython at {{mpy_dir}} (set MICROPYTHON_DIR)"; exit 1; }
         [ -n "$IDF_PATH" ] || { echo "ESP-IDF not sourced: source ~/esp/esp-idf/export.sh"; exit 1; }
+        case "{{version}}" in
+          ''|*[!0-9]*) echo "version must be a non-negative integer"; exit 1 ;;
+        esac
         mkdir -p "{{esp32_build}}/gen"
         printf 'FIRMWARE_VERSION = %s\n' "{{version}}" > "{{esp32_build}}/gen/version.py"
         (cd "{{mpy_dir}}/ports/esp32" && idf.py -D MICROPY_BOARD=HEALTHBAR_C3 \
@@ -122,6 +129,7 @@ flash-full board:
     set -e
     case "{{board}}" in
       esp32)
+        [ -f "{{esp32_build}}/idf/firmware.bin" ] || { echo "no image: run 'just build esp32' first"; exit 1; }
         P="${ESP32_PORT:?set ESP32_PORT, e.g. /dev/cu.usbmodem2133301}"
         esptool --chip esp32c3 --port "$P" erase-flash
         esptool --chip esp32c3 --port "$P" write-flash -z 0x0 "{{esp32_build}}/idf/firmware.bin" ;;
