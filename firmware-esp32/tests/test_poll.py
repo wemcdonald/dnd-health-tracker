@@ -73,6 +73,12 @@ def test_parse_response_garbage():
     assert poll.parse_response(b"HTTP/1.1 abc\r\n\r\n") is None
 
 
+def test_parse_response_bad_header_bytes():
+    # Non-UTF-8 header byte must not raise -- treated as unparseable.
+    raw = b"HTTP/1.1 200 OK\r\nX-Bad: \xff\xfe\r\n\r\n1 10 0 0\n"
+    assert poll.parse_response(raw) is None
+
+
 def test_classify_feed():
     assert poll.classify_feed((200, {}, "1 10 0 0\n")) == (1, 10, 0, 0)
     assert poll.classify_feed((404, {}, "unknown character: nan\n")) == poll.UNKNOWN_SLUG

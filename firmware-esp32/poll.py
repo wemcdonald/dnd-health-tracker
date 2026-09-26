@@ -71,6 +71,10 @@ def _split_host_port(host):
 # healthy).
 UNKNOWN_SLUG = "unknown-slug"
 
+# ESP32 heap; feed and config responses are tiny, but an intermediary error
+# page can be tens of KB.
+MAX_RESPONSE_BYTES = 16384
+
 
 def parse_response(raw):
     """Split a raw HTTP/1.x response. Returns (status, headers, body) or None.
@@ -90,15 +94,15 @@ def parse_response(raw):
         status = int(parts[1])
     except ValueError:
         return None
-    headers = {}
-    for line in lines[1:]:
-        k, _, v = line.partition(b":")
-        if k:
-            headers[k.strip().lower().decode()] = v.strip().decode()
     try:
+        headers = {}
+        for line in lines[1:]:
+            k, _, v = line.partition(b":")
+            if k:
+                headers[k.strip().lower().decode()] = v.strip().decode()
         text = body.decode()
     except Exception:
-        return None
+        return None  # non-UTF-8 header/body byte, or any other decode hiccup
     return (status, headers, text)
 
 
@@ -107,6 +111,11 @@ def http_request(host, path, port=80, timeout=8, headers=None):
 
     None means a network-level failure (DNS/connect/timeout/unparseable). Kept
     tiny and dependency-free (no urequests) to match the C poller.
+
+    Assumes no chunked Transfer-Encoding: we send no Accept-Encoding and the
+    origin (Fastify) sets Content-Length, so a chunked body isn't expected. A
+    chunked response would simply fail to parse and be treated as offline/None
+    -- we don't implement chunked decoding.
     """
     import socket
 
@@ -133,11 +142,15 @@ def http_request(host, path, port=80, timeout=8, headers=None):
         req += "\r\n"
         s.send(req.encode())
         chunks = []
+        total = 0
         while True:
             b = s.recv(512)
             if not b:
                 break
             chunks.append(b)
+            total += len(b)
+            if total > MAX_RESPONSE_BYTES:
+                return None
         raw = b"".join(chunks)
     except Exception:
         return None
