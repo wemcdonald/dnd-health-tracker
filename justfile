@@ -54,10 +54,14 @@ flash board:
     case "{{board}}" in
       pico) picotool load "{{uf2}}" -f -x ;;
       esp32)
-        mpremote fs mkdir :/data 2>/dev/null || true
-        mpremote fs cp {{esp32_src}}/data/config.json :/data/config.json
-        for f in {{esp32_src}}/*.py; do mpremote fs cp "$f" ":/$(basename "$f")"; done
-        mpremote reset ;;
+        # One mpremote session with `resume`: boot.py runs the app and never
+        # returns, so the soft reset mpremote does on each connect would hang it.
+        # Set ESP32_PORT when another board (e.g. the Pico) is also plugged in.
+        set -- connect "${ESP32_PORT:-auto}" resume \
+          exec "import os; 'data' in os.listdir('/') or os.mkdir('/data')" \
+          + fs cp {{esp32_src}}/data/config.json :/data/config.json
+        for f in {{esp32_src}}/*.py; do set -- "$@" + fs cp "$f" ":/$(basename "$f")"; done
+        mpremote "$@" + reset ;;
       *) echo "unknown board: {{board}} (pico|esp32)"; exit 1 ;;
     esac
 
